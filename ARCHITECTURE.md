@@ -1,6 +1,6 @@
 # RegWatch architecture
 
-Step 1 only: database, queue infrastructure, object storage, and migrations.
+Phase 1 so far: infrastructure, schema, and fixture-based RBI discovery.
 
 ```mermaid
 flowchart LR
@@ -30,13 +30,30 @@ flowchart LR
   its mc client at release RELEASE.2025-08-13T08-35-41Z, rather than switch
   storage products or depend on an unofficial binary mirror. First startup
   requires network access for source and Go dependency downloads.
+- 2026-11-06: Use a structural SourceAdapter protocol and frozen Publication
+  records. Adapters parse fetched bytes without performing I/O, so future
+  sources can share orchestration while retaining source-specific parsers.
+- 2026-11-06: Parse RSS with defusedxml, reject DTDs/entities, and cap input at
+  2 MiB. Standard ElementTree alone does not express the same explicit XML
+  safety policy; HTML parsing is inappropriate for validating an RSS feed.
+- 2026-11-06: Reject malformed entries rather than silently skip them, so a
+  broken listing cannot masquerade as an empty feed. A missing publication
+  date is allowed; a supplied date must be valid and timezone-aware.
+- 2026-11-06: Preserve URL query order and path case, strip fragments, normalize
+  hostname/default ports, and keep the first duplicate. Query sorting and
+  forcing HTTPS are rejected because their equivalence is source-dependent.
+  RBI discovery accepts only rbi.org.in and its subdomains; the generic adapter
+  contract itself has no regulator-specific host restriction.
 
 ## Current limits
 
 Version rows contain references to snapshots; application-enforced immutable
 uploads and content addressing will arrive with the crawl/storage step. This
 infrastructure alone does not establish an immutable snapshot pipeline.
-No lease scheduler, fetcher, adapter, HTTP API, or notifications exist yet.
+No lease scheduler, fetcher, HTTP API, or notifications exist yet. RBI discovery
+is tested against synthetic RSS only; compatibility with the live feed remains
+unverified. No RBI network requests occur in adapter code or tests. The future
+fetcher must separately enforce robots policies and validate redirect hosts.
 Source validators are reserved fields; document-level validators can be added
 when fetching behavior is implemented. Parser yield counts extracted sections.
 

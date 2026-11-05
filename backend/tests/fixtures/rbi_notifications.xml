@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic RSS test fixture. Not captured from RBI and not real regulatory guidance. -->
+<rss version="2.0">
+  <channel>
+    <title>RBI notifications — synthetic fixture</title>
+    <link>https://www.rbi.org.in/</link>
+    <description>Illustrative entries used only to test discovery.</description>
+    <item>
+      <title>  Example KYC &amp; reporting notification  </title>
+      <link>https://WWW.RBI.ORG.IN:443/Scripts/NotificationUser.aspx?Id=10001&amp;Mode=0#details</link>
+      <pubDate>Thu, 05 Nov 2026 10:00:00 +0530</pubDate>
+    </item>
+    <item>
+      <title>Example second notification</title>
+      <link>/Scripts/NotificationUser.aspx?Id=10002</link>
+    </item>
+    <item>
+      <title>Duplicate first notification</title>
+      <link>https://www.rbi.org.in/Scripts/NotificationUser.aspx?Id=10001&amp;Mode=0</link>
+      <pubDate>Thu, 05 Nov 2026 04:30:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

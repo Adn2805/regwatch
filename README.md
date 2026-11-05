@@ -1,7 +1,8 @@
 # RegWatch
 
 A deterministic regulatory change monitor, built in gated steps. Currently:
-Phase 1, Step 1 infrastructure and schema only. RBI is the first intended source.
+Phase 1: infrastructure, schema, and fixture-based RBI discovery. RBI is the
+first intended source; live crawling is disabled pending robots policy review.
 
 ## Start
 
@@ -42,7 +43,8 @@ To check migration reversibility on an empty development database only:
 ## Results
 
 No crawl, performance, or AI evaluation results have been measured.
-Phase 1's complete gate remains pending; only Step 1 is implemented.
+Phase 1's complete gate remains pending. Discovery uses synthetic fixtures;
+fetching, snapshots, change detection, read endpoints, and CI remain unfinished.
 
 Step 1 verification on 2026-11-05 (Docker Desktop, Linux containers):
 
@@ -60,6 +62,34 @@ Step 1 verification on 2026-11-05 (Docker Desktop, Linux containers):
 
 These are functional checks, not load benchmarks or a completed Phase 1 gate.
 GitHub CI has not been configured or run in Step 1.
+
+## Verify fixture-based discovery
+
+Rebuild the backend image to include the XML dependency and adapter:
+
+```powershell
+docker compose build migrate
+docker compose run --rm migrate pytest tests/unit/test_adapters.py -q
+docker compose run --rm migrate ruff check .
+docker compose run --rm migrate mypy app migrations tests
+```
+
+For a readable preview, run from `backend/` in the Python 3.12 environment:
+
+```powershell
+python -c "from pathlib import Path; from app.crawl.adapters.rbi import RbiAdapter; print(*RbiAdapter().discover(Path('tests/fixtures/rbi_notifications.xml').read_bytes(), base_url='https://www.rbi.org.in/notifications_rss.xml'), sep='\n')"
+```
+
+The synthetic fixture contains three entries representing two distinct URLs.
+The parser returns two records, preserves query parameters, removes fragments,
+and converts the supplied date to UTC. A missing date stays `None`. Invalid
+entries raise `AdapterParseError`; they are not silently reported as no updates.
+These fixture entries are illustrative and are not actual RBI circulars.
+
+Verification on 2026-11-06: the rebuilt Compose image passed all 42 tests
+(35 adapter cases, 2 schema unit tests, and 5 PostgreSQL integration tests).
+Ruff and strict mypy passed locally; these functional checks do not establish
+live RBI compatibility or complete the Phase 1 gate.
 
 ## Explain the schema
 
