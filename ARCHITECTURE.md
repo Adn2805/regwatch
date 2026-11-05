@@ -1,6 +1,7 @@
 # RegWatch architecture
 
-Phase 1 so far: infrastructure, schema, and fixture-based RBI discovery.
+Phase 1 so far: infrastructure, schema, fixture-based RBI discovery, and a tested
+HTTP fetcher with robots handling. No live source is enabled.
 
 ```mermaid
 flowchart LR
@@ -45,15 +46,52 @@ flowchart LR
   RBI discovery accepts only rbi.org.in and its subdomains; the generic adapter
   contract itself has no regulator-specific host restriction.
 
+
+- 2026-11-06: Use httpx streaming with explicit connect/read/write/pool timeouts,
+  two retries by default, capped exponential backoff, and capped Retry-After
+  handling for 429/503. No jitter is implemented in this step.
+- 2026-11-06: Delegate path precedence, wildcard matching, and fractional
+  Crawl-delay to [Protego](https://pypi.org/project/Protego/0.4.0/).
+  A strict UTF-8/directive validation layer pauses on malformed input rather
+  than allowing a lenient parser to mistake an HTML error page for permission.
+  Reimplementing wildcard/precedence logic or using a less capable parser was
+  rejected to keep source-specific crawling code understandable and testable.
+- 2026-11-06: Cache successful, missing, and unavailable robots policies for a
+  configurable TTL (default 1 hour) in one Fetcher instance. Scope policies by
+  scheme/host/port; share request pacing and locks by hostname. Concurrent
+  callers share a single policy load. The largest observed Crawl-delay is
+  retained for the Fetcher's lifetime, which is deliberately conservative.
+  Distributed Redis limits and worker coordination remain Phase 2 work.
+- 2026-11-06: Treat robots 404/410 as unrestricted. Treat 401/403, other unexpected
+  statuses, exhausted transport/5xx failures, malformed or oversized policies
+  as SourcePaused. An empty/comment-only valid file allows access. A caller will
+  persist the paused state when crawl orchestration is built; this step only
+  returns typed failure outcomes and does not write database state.
+- 2026-11-06: Follow redirects manually, with loop and hop limits, checking robots
+  for every content destination and retry (refreshing expired cache entries).
+  Fetching robots itself and its bounded redirects is the bootstrap exception;
+  recursively checking robots before retrieving robots cannot terminate.
+  A redirected policy governs the original origin, not the policy server.
+- 2026-11-06: Request identity content encoding and count streamed raw bytes,
+  with a 10 MiB default response limit and early Content-Length rejection.
+  Unexpected content encoding is rejected so compressed payloads cannot bypass
+  the memory bound. Streams close on success, retry, and size-limit failure.
+- 2026-11-06: Represent the contact address as SecretStr and omit URLs, headers,
+  and bodies from result repr and failure messages. Suppress httpx/httpcore
+  INFO/debug wire logs that could expose headers or query values. No request
+  or response payloads are logged by this layer.
+
 ## Current limits
 
 Version rows contain references to snapshots; application-enforced immutable
 uploads and content addressing will arrive with the crawl/storage step. This
 infrastructure alone does not establish an immutable snapshot pipeline.
-No lease scheduler, fetcher, HTTP API, or notifications exist yet. RBI discovery
+No lease scheduler, HTTP API, or notifications exist yet. RBI discovery
 is tested against synthetic RSS only; compatibility with the live feed remains
-unverified. No RBI network requests occur in adapter code or tests. The future
-fetcher must separately enforce robots policies and validate redirect hosts.
+unverified. No live RBI requests have been made. Tests inject MockTransport and fake clocks;
+the new network tests also run with Docker networking disabled. HTTP destinations
+are validated and policy-checked; source enablement and site-terms review remain
+manual prerequisites for a future live crawl.
 Source validators are reserved fields; document-level validators can be added
 when fetching behavior is implemented. Parser yield counts extracted sections.
 
