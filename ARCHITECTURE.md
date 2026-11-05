@@ -1,7 +1,8 @@
 # RegWatch architecture
 
 Phase 1 so far: infrastructure, schema, fixture-based RBI discovery, and a tested
-HTTP fetcher with robots handling. No live source is enabled.
+HTTP fetcher with robots handling, immutable snapshot storage, and version persistence.
+No live source is enabled.
 
 ```mermaid
 flowchart LR
@@ -81,11 +82,40 @@ flowchart LR
   INFO/debug wire logs that could expose headers or query values. No request
   or response payloads are logged by this layer.
 
+
+- 2026-11-06: Keep `Accept-Encoding: identity` and reject unexpected compression
+  before reading the body. A real-gzip regression test checks zero body reads
+  and stream closure. This preserves the existing raw-byte size bound without
+  introducing a decompression subsystem in Phase 1.
+- 2026-11-06: Hash exact bytes with SHA-256; store objects at `sha256/<digest>`.
+  Boto3 conditional PUT (`IfNoneMatch="*"`) prevents overwrites through this
+  storage API, including concurrent writers. HEAD-then-PUT was rejected because
+  another writer could create the object between those calls. Conditional-write
+  semantics were tested against the running MinIO server.
+- 2026-11-06: Write object Content-Type plus `content-type`, `byte-size`, and
+  `sha256` user metadata. A 412 response reuses the existing object only after
+  HEAD verifies consistent metadata and size. The first writer's content type
+  remains immutable even if a later response declares another type.
+- 2026-11-06: Use the synchronous Boto3 S3 client with explicit connect/read
+  timeouts and bounded standard retries. A non-412 error is surfaced as a
+  sanitized SnapshotStorageError, including 409 conflicts that a caller may
+  retry. Client ownership/closure belongs to the caller. Future async workers
+  must offload synchronous storage/SQL calls rather than block the event loop.
+- 2026-11-06: Upload before opening a short PostgreSQL transaction, then insert
+  the version with ON CONFLICT against `(document_id, content_hash)`. Storage
+  failure leaves database state untouched. A later database failure rolls back
+  the version but may leave an unreferenced content-addressed object; retries
+  safely reuse it. Do not delete objects on rollback: another document may
+  already reference the same bytes. There is no cross-system ACID transaction.
+- 2026-11-06: record_version requires caller-supplied text/sections and an existing
+  document. It does not implement parsing, document discovery, change detection,
+  scheduling, or HTTP endpoints. No migration is needed for this step.
+
 ## Current limits
 
-Version rows contain references to snapshots; application-enforced immutable
-uploads and content addressing will arrive with the crawl/storage step. This
-infrastructure alone does not establish an immutable snapshot pipeline.
+The storage API now conditionally writes immutable content-addressed objects.
+Version persistence is tested, but fetch, discovery, parsing, and change detection
+are not yet orchestrated into a complete crawl pipeline.
 No lease scheduler, HTTP API, or notifications exist yet. RBI discovery
 is tested against synthetic RSS only; compatibility with the live feed remains
 unverified. No live RBI requests have been made. Tests inject MockTransport and fake clocks;

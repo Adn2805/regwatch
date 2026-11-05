@@ -1,3 +1,4 @@
+import gzip
 import logging
 import traceback
 from collections.abc import AsyncIterator
@@ -372,3 +373,35 @@ def test_contact_and_settings_are_loaded_from_environment(monkeypatch: pytest.Mo
     assert settings.user_agent() == "RegWatch/0.1 (+mailto:owner@example.invalid)"
     assert settings.robots_cache_ttl_s == 120
     assert "owner@example.invalid" not in repr(settings)
+
+
+@pytest.mark.asyncio
+async def test_identity_request_rejects_real_gzip_without_reading_body(
+    make_rig: RigFactory,
+) -> None:
+    class GzipBody(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.reads = 0
+            self.closed = False
+            self.compressed = gzip.compress(b"x" * 100_000)
+
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            self.reads += 1
+            yield self.compressed
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    stream = GzipBody()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["accept-encoding"] == "identity"
+        if request.url.path == "/robots.txt":
+            return reply(404)
+        return httpx.Response(200, stream=stream, headers={"Content-Encoding": "gzip"})
+
+    rig = make_rig(handler, {"crawl_max_response_bytes": 1024})
+    with pytest.raises(FetchError, match="content encoding"):
+        await rig.fetcher.fetch(URL)
+    assert stream.reads == 0
+    assert stream.closed

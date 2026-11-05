@@ -1,4 +1,4 @@
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -59,3 +59,27 @@ class FetchSettings(BaseSettings):
 
     def user_agent(self) -> str:
         return f"RegWatch/0.1 (+mailto:{self.crawl_contact_email.get_secret_value()})"
+
+
+class StorageSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        case_sensitive=False, extra="ignore", hide_input_in_errors=True
+    )
+
+    minio_root_user: SecretStr = Field(min_length=1)
+    minio_root_password: SecretStr = Field(min_length=1)
+    snapshot_bucket: str = Field(
+        default="regwatch-snapshots", pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+    )
+    s3_endpoint_url: AnyHttpUrl = AnyHttpUrl("http://minio:9000")
+    s3_region: str = Field(default="us-east-1", min_length=1)
+    s3_connect_timeout_s: float = Field(default=3, gt=0, allow_inf_nan=False)
+    s3_read_timeout_s: float = Field(default=10, gt=0, allow_inf_nan=False)
+    s3_max_attempts: int = Field(default=3, ge=1, le=10)
+
+    @field_validator("s3_endpoint_url")
+    @classmethod
+    def validate_endpoint(cls, value: AnyHttpUrl) -> AnyHttpUrl:
+        if value.username or value.password or value.query or value.fragment or value.path != "/":
+            raise ValueError("S3 endpoint must be an HTTP(S) origin without credentials")
+        return value

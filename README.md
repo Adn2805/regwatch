@@ -2,7 +2,7 @@
 
 A deterministic regulatory change monitor, built in gated steps. Currently:
 Phase 1: infrastructure, schema, fixture-based RBI discovery, and a tested
-fetcher with robots handling. RBI is the
+fetcher with robots handling, plus snapshot storage and version persistence. RBI is the
 first intended source; live crawling is disabled pending robots policy review.
 
 ## Start
@@ -45,7 +45,7 @@ To check migration reversibility on an empty development database only:
 
 No crawl, performance, or AI evaluation results have been measured.
 Phase 1's complete gate remains pending. Discovery uses synthetic fixtures;
-crawl orchestration, snapshots, change detection, read endpoints, and CI remain unfinished.
+crawl orchestration, parsing, change detection, read endpoints, and CI remain unfinished.
 
 Step 1 verification on 2026-11-05 (Docker Desktop, Linux containers):
 
@@ -166,8 +166,8 @@ is rejected, and oversize streams close without buffering the remaining body.
 The layer emits no payload/request logs; contact settings are masked in repr,
 and request URLs/headers are excluded from error messages.
 
-Live crawling remains disabled. Storage, version hashing, orchestration, APIs,
-and CI are still required before the complete Phase 1 gate can pass.
+Live crawling remains disabled. Full orchestration, parsing, change detection,
+APIs, and CI are still required before the complete Phase 1 gate can pass.
 
 
 Step 3 verification on 2026-11-06, using the final Docker image:
@@ -185,3 +185,74 @@ concurrent callers, expired policy rechecks during retry, HTTP Retry-After,
 redirect loops/hop limits/disallowed destinations, streaming size limits and
 stream closure, User-Agent/timeouts, and secret-safe failure/log output.
 These are functional test results, not production throughput or load benchmarks.
+
+
+## Step 4: immutable snapshots and hashing
+
+Compression choice: keep `Accept-Encoding: identity`. Unexpected compression is
+rejected before any body read, and the stream closes. A regression test uses a
+real gzip payload expanding to 100,000 bytes; it verifies zero reads. There is
+no decompression implementation or compressed-payload memory expansion.
+
+`app.diff.hashing.content_hash(bytes)` returns SHA-256 of the exact body bytes.
+`SnapshotStore.put(bytes, content_type=...)` writes `sha256/<digest>` with a
+conditional S3 PUT (`IfNoneMatch="*"`). Repeated/concurrent identical uploads
+create one object. Different bytes have different keys. The original HTTP
+Content-Type, `content-type`, `byte-size`, and `sha256` metadata are stored.
+If the key exists, metadata and byte size are checked and the original metadata
+is retained. No existing object is overwritten, including one with inconsistent
+metadata; the latter produces a clear failure rather than a repair write.
+
+`record_version(...)` takes an existing document ID, a FetchResult, and
+caller-supplied extracted text/sections. It uploads first, then opens a database
+transaction and inserts one version, deduplicated by document ID and content
+hash. Storage failure leaves source/document/version counts unchanged. Database
+failure rolls back the version; an unreferenced object can remain and be reused
+on retry. This is deliberately not described as atomic across two services.
+No parser, live crawl, change record, endpoint, or schema migration was added.
+
+S3 configuration uses the existing local-development `MINIO_ROOT_USER`,
+`MINIO_ROOT_PASSWORD`, and `SNAPSHOT_BUCKET` values. The client is synchronous
+and must be closed by its caller; async workers will need to offload it.
+
+| Environment variable | Default |
+| --- | --- |
+| `S3_ENDPOINT_URL` | `http://minio:9000` |
+| `S3_REGION` | `us-east-1` |
+| `S3_CONNECT_TIMEOUT_S` | 3 seconds |
+| `S3_READ_TIMEOUT_S` | 10 seconds |
+| `S3_MAX_ATTEMPTS` | 3 total attempts per SDK call |
+
+Run from `D:\Project\regwatch` with the existing services running:
+
+```powershell
+docker compose build migrate
+docker run --rm --network none --entrypoint pytest regwatch-migrate tests/unit -q
+docker compose run --rm --no-deps migrate pytest tests/integration/test_snapshots.py -q
+docker compose run --rm --no-deps migrate pytest -q
+docker run --rm --network none --entrypoint ruff regwatch-migrate check .
+docker run --rm --network none --entrypoint mypy regwatch-migrate app migrations tests
+```
+
+Unit tests disable container networking and stub S3 responses. Integration tests
+use only the local MinIO/PostgreSQL services, create unique `regwatch-test-*`
+buckets and database rows, and clean up their own data. They verify byte-for-byte
+retrieval, metadata preservation, eight simultaneous identical writes, database
+isolation on storage failure, and retry after database rollback. No regulator is
+contacted. The pinned SDK currently emits a UTC deprecation warning in signing;
+this does not change the test outcome and is not hidden by a warning filter.
+
+
+Step 4 verification on 2026-11-06, final Docker image:
+
+```text
+Offline unit suite: 135 passed in 0.84s
+Full suite: 147 passed, 69 warnings in 1.97s
+Ruff: All checks passed!
+Formatting: 43 files already formatted
+Strict mypy: Success: no issues found in 27 source files
+```
+
+The 69 warnings are the pinned SDK's UTC deprecation warning during local S3
+request signing. Tests passed with the warnings visible. These are functional
+checks, not load benchmarks; the complete Phase 1 gate remains pending.

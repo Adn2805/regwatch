@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Verify identity encoding with a real-gzip test that rejects compression before reading.
+- Add SHA-256 hashing, conditional MinIO snapshot writes, immutable object metadata,
+  and upload-before-transaction version persistence.
+- Test duplicate/concurrent writes, raw-byte retrieval, storage failure isolation,
+  and database rollback/retry against local MinIO and PostgreSQL.
+
 - Add Phase 1 Step 3: httpx fetcher, robots policy checks and TTL cache,
   request pacing, bounded retries/redirects, and streaming response size limits.
 - Add mocked timeout/status/redirect/policy/size/privacy tests with fake clocks;
