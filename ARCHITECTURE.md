@@ -164,6 +164,16 @@ flowchart LR
 - 2026-11-06: RBI returned 418 for robots.txt; the source is paused rather than guessing; RBI is tested via fixtures.
 - 2026-11-06: Preserve the robots HTTP status in cached paused reasons, including retry-exhausted 429 responses. A robots-only fetcher method supports policy inspection without requesting any content page.
 
+- 2026-11-06: SEBI Part 1 captures exact robots.txt bytes and tests that an empty
+  Disallow imposes no restriction while the /js, /css, /hindi/js and /hindi/css
+  prefixes remain disallowed. Git newline conversion is disabled for this fixture.
+  No content page is requested as part of this parser verification.
+- 2026-11-06: The user reviewed SEBI's website policy and authorized only a small,
+  slow public crawl for private storage. Do not commit full SEBI circulars or PDFs;
+  committed content fixtures must be small trimmed samples, accurately reproduced
+  and credited to SEBI. Copyright/permission requirements still apply. This is a
+  portfolio project, not legal advice.
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.

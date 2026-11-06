@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add Part 1 exact SEBI robots fixture and offline tests for empty Disallow
+  semantics and restricted directory prefixes; no content pages are fetched.
+- Record SEBI source credit, private-storage limits, and portfolio disclaimer.
+
 - Test every robots 4xx status except the allowed 404/410 cases; persist clear
   HTTP status reasons for paused sources. Add robots-only policy inspection.
 - Keep RBI fixtures-only following its robots 418 response; no bypass is used.

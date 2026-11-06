@@ -480,3 +480,55 @@ The warnings are the existing SDK UTC and Starlette/AnyIO deprecations. These
 checks used mocked regulator HTTP; RBI was not retried. A one-request SEBI
 robots-only probe is performed separately with retries and redirects disabled,
 using the normal crawler identity/transport. It does not crawl any content page.
+
+
+## SEBI verification and source credit
+
+This is a portfolio project, not legal advice.
+SEBI material is sourced from the [Securities and Exchange Board of India](https://www.sebi.gov.in/).
+The user reviewed the [SEBI website policy](https://www.sebi.gov.in/website-policy.html)
+and authorized only a small, slow crawl of public documents for private storage.
+Full SEBI circulars and PDFs must not be committed to this repository. Committed
+content fixtures must be small trimmed samples that preserve structure and
+accuracy and acknowledge SEBI as the source; copyright/permission requirements
+remain applicable. This records the user's reviewed constraints, not an
+independent legal assessment.
+
+Part 1 captured [SEBI robots.txt](https://www.sebi.gov.in/robots.txt) through one
+normal RegWatch robots-only request on 2026-11-06: HTTP 200, 101 bytes.
+The exact fixture is `backend/tests/fixtures/sebi_robots.txt`, with SHA-256
+`5b67a9fe05a33e682223588db67fce7753041b85ff8264d8ce1ae854f40a366c`.
+Git newline conversion is disabled for that file to preserve its bytes.
+The PDF path below is only a local policy-check example; no PDF was requested.
+
+| Path | RegWatch policy decision |
+| --- | --- |
+| `/legal.html` | Allowed |
+| `/sebi_data/attachdocs/example-circular.pdf` | Allowed |
+| `/js/x` | Disallowed |
+| `/css/x` | Disallowed |
+| `/hindi/js/x` | Disallowed |
+| `/hindi/css/x` | Disallowed |
+
+An empty `Disallow:` line imposes no restriction; it does not erase the other
+non-empty restrictions in the same policy. The tests also verify an empty
+Disallow by itself allows all three requested example paths.
+No listing, circular, or PDF request was made. Part 2 requires a separate go-ahead.
+
+```powershell
+docker compose build migrate
+docker run --rm --network none --entrypoint pytest regwatch-migrate tests/unit/test_sebi_robots.py -q
+```
+
+
+Part 1 verification in offline Docker:
+
+```text
+Exact SEBI policy and empty-rule tests: 9 passed in 0.02s
+Combined robots suite: 138 passed in 0.85s
+Ruff: All checks passed!
+Strict mypy: Success: no issues found in 41 source files
+```
+
+The staged fixture was verified byte-for-byte against the captured 101-byte
+response. Its original CRLF and trailing space are intentionally preserved.

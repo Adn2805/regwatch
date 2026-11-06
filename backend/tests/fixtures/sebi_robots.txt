@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: 
+Disallow: /js
+Disallow: /hindi/js
+Disallow: /css
+Disallow: /hindi/css
