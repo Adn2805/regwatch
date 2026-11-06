@@ -1,15 +1,22 @@
 # RegWatch architecture
 
-Phase 1 so far: infrastructure, schema, fixture-based RBI discovery, and a tested
-HTTP fetcher with robots handling, immutable snapshot storage, and version persistence.
-A crawl service now joins discovery, fetching, storage, and naive change detection.
-No live source is enabled.
+Phase 1 is complete: infrastructure and migrations, fixture-tested RBI and SEBI
+adapters, robots-aware bounded HTTP fetching, immutable raw snapshots, version
+deduplication, naive changes, crawl-run auditing and four read endpoints. SEBI was
+verified live by an explicit CLI invocation; no automatic scheduler exists. RBI
+remains paused and fixtures-only. Meaningful diffs and distributed reliability
+are Phase 2 work.
 
 ```mermaid
 flowchart LR
-  M[Alembic migration service] --> P[(PostgreSQL 16 + pgvector)]
-  B[Bucket initializer] --> S[(MinIO)]
-  R[(Redis)]
+  CLI[Explicit crawl CLI] --> F[Robots-aware fetcher]
+  F --> C[Crawl service and adapters]
+  C --> S[(MinIO raw snapshots)]
+  C --> P[(PostgreSQL 16 + pgvector)]
+  API[FastAPI read endpoints] --> P
+  M[Alembic migrations] --> P
+  B[Bucket initializer] --> S
+  R[(Redis: available; distributed controls arrive in Phase 2)]
 ```
 
 ## Decision log

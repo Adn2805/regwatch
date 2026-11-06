@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Correct Phase 1 summary and functional results; tag its verified commit as
+  v0.1-phase1. Begin Phase 2 in reviewed batches, without regulator requests.
+
 - Extend the bounded CLI to SEBI with HTML-only destinations, zero retries or
   redirects, at least 5-second delays, and stop-on-error execution.
 - Record successful two-document live SEBI repeat-crawl deduplication; RBI

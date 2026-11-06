@@ -1,10 +1,13 @@
 # RegWatch
 
-A deterministic regulatory change monitor, built in gated steps. Currently:
-Phase 1: infrastructure, schema, fixture-based RBI discovery, and a tested
-fetcher with robots handling, snapshot storage, and a crawl service with naive
-change detection, durable run counts, and four read endpoints. RBI is the
-first intended source; live crawling is disabled pending robots policy review.
+A deterministic regulatory change monitor, built in gated steps. Phase 1 is
+complete: PostgreSQL/Redis/MinIO infrastructure, schema and migrations, robots-aware
+bounded fetching, immutable snapshots, raw-byte version deduplication, crawl-run
+auditing, four read endpoints and Docker-based GitHub Actions CI.
+
+RBI is fixtures-only after robots HTTP 418. SEBI discovery covers the first
+listing page only; a two-document live repeat crawl created zero new versions.
+The CLI is explicitly invoked; there is no automatic scheduler yet.
 
 ## Start
 
@@ -44,9 +47,16 @@ To check migration reversibility on an empty development database only:
 
 ## Results
 
-No crawl, performance, or AI evaluation results have been measured.
-Phase 1's complete gate remains pending. Discovery uses synthetic fixtures;
-parsing, scheduled worker integration, CI, and live RBI verification remain unfinished.
+Phase 1 gate passed for commit `406a648`: a fresh external clone started with
+one Compose command; `/docs` and `/sources` returned HTTP 200; hashing and adapter
+tests passed (54 tests); GitHub Actions passed. The two live SEBI runs fetched two
+HTML documents each, with five-second delays and zero retries: two versions on
+the first run and zero new versions on the repeat. These are functional checks,
+not load benchmarks or AI evaluation results.
+
+[Phase 1 CI result](https://github.com/Adn2805/regwatch/actions/runs/42211577032).
+
+The following historical checks describe earlier implementation steps.
 
 Step 1 verification on 2026-11-05 (Docker Desktop, Linux containers):
 
