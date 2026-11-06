@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate disposable local-service credentials
+        run: |
+          python3 - <<'PY'
+          import secrets
+          from pathlib import Path
+          database_password = secrets.token_hex(24)
+          storage_password = secrets.token_hex(24)
+          for value in (database_password, storage_password):
+              print("::add-mask::" + value)
+          Path(".env").write_text("\n".join([
+              "POSTGRES_DB=regwatch", "POSTGRES_USER=regwatch",
+              "POSTGRES_PASSWORD=" + database_password,
+              "MINIO_ROOT_USER=regwatch", "MINIO_ROOT_PASSWORD=" + storage_password,
+              "SNAPSHOT_BUCKET=regwatch-snapshots",
+          ]) + "\n")
+          PY
+      - name: Scan committed history
+        run: python3 scripts/check_history.py
+      - name: Build test and object-store images
+        run: docker compose build migrate minio
+      - name: Start local dependencies
+        run: |
+          docker compose up -d --no-build postgres redis minio
+          docker compose run --rm --no-deps bucket-init
+          docker compose run --rm migrate alembic upgrade head
+          docker compose run --rm --no-deps migrate alembic check
+      - name: Lint
+        run: docker compose run --rm --no-deps --volume "$PWD/scripts:/scripts:ro" migrate ruff check . /scripts
+      - name: Strict types
+        run: docker compose run --rm --no-deps --volume "$PWD/scripts:/scripts:ro" migrate mypy app migrations tests /scripts
+      - name: Tests with local PostgreSQL and MinIO
+        run: docker compose run --rm --no-deps migrate pytest -q
+      - name: Dependency logs on failure
+        if: failure()
+        run: docker compose logs --tail 60 postgres redis minio
+      - name: Stop local dependencies
+        if: always()
+        run: docker compose down --volumes --remove-orphans
