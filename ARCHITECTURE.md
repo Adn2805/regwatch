@@ -206,6 +206,16 @@ flowchart LR
   stricter observed rates persist until idle expiry. Client calls have bounded
   timeouts and no automatic retries. Fetcher integration follows in A2.
 
+- 2026-11-06: Phase 2 A2 wires Redis admission into every CLI HTTP attempt,
+  including robots, retries and redirect hops. Unique owner tokens hold shared
+  per-host concurrency permits until response streams close; local pacing stays.
+  An attempt has a total deadline, and its Redis lease includes admission/cleanup
+  margins. Cancellation releases the owner's permit; process death leaves a
+  permit until expiry. Redis outages fail closed, never switching to local-only
+  crawling. Rates/caps assume consistently configured workers and durable Redis;
+  Redis data loss or a process suspended beyond its lease is not exactly-once
+  network execution. Scheduler ownership recovery remains Batch B work.
+
 ## Live verification
 
 On 2026-11-06, RBI returned HTTP 418 for robots.txt; it remains paused and

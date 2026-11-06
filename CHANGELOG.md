@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Apply Redis token buckets and expiring concurrency permits to CLI requests,
+  with total HTTP deadlines and cancellation/failure-path tests (Phase 2 A2).
+
 - Add standalone atomic Redis token buckets, bounded client settings, and real-Redis
   concurrency/refill/failure tests (Phase 2 A1).
 

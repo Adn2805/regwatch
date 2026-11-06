@@ -15,6 +15,7 @@ from app.core.config import FetchSettings
 from app.crawl.adapters.base import AdapterParseError, canonicalize_url
 from app.crawl.errors import FetchError, ResponseTooLarge, RobotsDisallowed
 from app.crawl.robots import RobotsCache, RobotsPolicy
+from app.crawl.concurrency import RedisRequestGate
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
@@ -56,10 +57,12 @@ class Fetcher:
         client: httpx.AsyncClient,
         settings: FetchSettings | None = None,
         *,
+        coordination: RedisRequestGate | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
+        self._coordination = coordination
         self._client = client  # Caller owns and closes the injected client.
         self._settings = settings if settings is not None else FetchSettings()
         self._clock, self._sleep, self._now = clock, sleep, now
@@ -143,42 +146,53 @@ class Fetcher:
                 if remaining > 0:
                     await self._sleep(remaining)
             try:
-                async with self._client.stream(
-                    "GET",
-                    url,
-                    follow_redirects=False,
-                    timeout=httpx.Timeout(self._settings.crawl_timeout_s),
-                    headers={
-                        "User-Agent": self._settings.user_agent(),
-                        "Accept-Encoding": "identity",
-                    },
-                ) as response:
-                    body = bytearray()
-                    if 200 <= response.status_code < 300:
-                        if (
-                            response.headers.get("content-encoding", "identity").lower()
-                            != "identity"
-                        ):
-                            raise FetchError(
-                                "Unexpected response content encoding; expected identity"
-                            )
-                        limit = self._settings.crawl_max_response_bytes
-                        declared = response.headers.get("content-length")
-                        if declared is not None:
-                            try:
-                                length = int(declared)
-                            except ValueError:
-                                raise FetchError("Invalid response content length") from None
-                            if length < 0:
-                                raise FetchError("Invalid response content length")
-                            if length > limit:
-                                raise ResponseTooLarge("Response exceeds configured size limit")
-                        async for chunk in response.aiter_raw():
-                            if len(body) + len(chunk) > limit:
-                                raise ResponseTooLarge("Response exceeds configured size limit")
-                            body.extend(chunk)
-                    return FetchResult(
-                        str(response.url), response.status_code, dict(response.headers), bytes(body)
-                    )
+                if self._coordination is not None:
+                    async with self._coordination.slot(host, minimum_interval_s=delay):
+                        return await self._bounded_read(url)
+                return await self._bounded_read(url)
             finally:
                 self._finished[host] = self._clock()
+
+    async def _bounded_read(self, url: str) -> FetchResult:
+        deadline = self._settings.crawl_total_timeout_s
+        if self._coordination is not None:
+            deadline = min(deadline, self._coordination.request_timeout_s)
+        try:
+            async with asyncio.timeout(deadline):
+                return await self._read_response(url)
+        except TimeoutError:
+            raise httpx.ReadTimeout("HTTP attempt total deadline exceeded") from None
+
+    async def _read_response(self, url: str) -> FetchResult:
+        async with self._client.stream(
+            "GET",
+            url,
+            follow_redirects=False,
+            timeout=httpx.Timeout(self._settings.crawl_timeout_s),
+            headers={
+                "User-Agent": self._settings.user_agent(),
+                "Accept-Encoding": "identity",
+            },
+        ) as response:
+            body = bytearray()
+            if 200 <= response.status_code < 300:
+                if response.headers.get("content-encoding", "identity").lower() != "identity":
+                    raise FetchError("Unexpected response content encoding; expected identity")
+                limit = self._settings.crawl_max_response_bytes
+                declared = response.headers.get("content-length")
+                if declared is not None:
+                    try:
+                        length = int(declared)
+                    except ValueError:
+                        raise FetchError("Invalid response content length") from None
+                    if length < 0:
+                        raise FetchError("Invalid response content length")
+                    if length > limit:
+                        raise ResponseTooLarge("Response exceeds configured size limit")
+                async for chunk in response.aiter_raw():
+                    if len(body) + len(chunk) > limit:
+                        raise ResponseTooLarge("Response exceeds configured size limit")
+                    body.extend(chunk)
+            return FetchResult(
+                str(response.url), response.status_code, dict(response.headers), bytes(body)
+            )

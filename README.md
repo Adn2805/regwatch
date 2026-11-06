@@ -564,3 +564,10 @@ possible secret.
 Phase 2 Batch A step 1 adds a standalone Redis token bucket. Run its real-Redis
 checks with `docker compose run --rm --no-deps migrate pytest tests/integration/test_redis_ratelimit.py -q`
 after rebuilding `migrate`. The component is wired into HTTP fetching in step 2.
+
+Phase 2 A2 wires shared Redis limits into the explicit CLI. Every request attempt
+(including robots/retries/redirects) is admitted; concurrency permits last through
+body closure. Configure `DOMAIN_CONCURRENCY`, `RATE_INTERVAL_S`, `RATE_CAPACITY`,
+`COORDINATION_WAIT_S` and `CRAWL_TOTAL_TIMEOUT_S` consistently across workers.
+Redis failure stops fetching. Run `tests/integration/test_redis_fetcher.py` in
+Compose to verify shared limits and cancellation with mocked HTTP.

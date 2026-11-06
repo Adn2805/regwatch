@@ -12,7 +12,9 @@ from defusedxml import ElementTree  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import FetchSettings, StorageSettings
+from app.core.config import FetchSettings, StorageSettings, RedisSettings
+from app.core.redis import make_redis_client
+from app.crawl.concurrency import RedisRequestGate
 from app.core.db import make_engine
 from app.core.s3 import SnapshotStore, make_s3_client
 from app.crawl.fetcher import Fetcher, FetchResult
@@ -64,8 +66,14 @@ def rbi_source(sessions: sessionmaker[Session], source_name: str = "rbi") -> UUI
 
 
 class RecordingFetcher(Fetcher):
-    def __init__(self, client: httpx.AsyncClient, settings: FetchSettings) -> None:
-        super().__init__(client, settings)
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        settings: FetchSettings,
+        *,
+        coordination: RedisRequestGate | None = None,
+    ) -> None:
+        super().__init__(client, settings, coordination=coordination)
         self.feed: bytes | None = None
 
     async def fetch(self, url: str) -> FetchResult:
@@ -103,6 +111,8 @@ async def run_once(max_documents: int, feed_sample: Path | None, source_name: st
             "crawl_max_redirects": 0,
         }
     )
+    redis_settings = RedisSettings()
+    redis = make_redis_client(redis_settings)
     storage_settings = StorageSettings()
     engine = make_engine()
     s3 = make_s3_client(storage_settings)
@@ -135,7 +145,13 @@ async def run_once(max_documents: int, feed_sample: Path | None, source_name: st
         async with httpx.AsyncClient(
             event_hooks={"request": [request_hook], "response": [response_hook]}
         ) as client:
-            fetcher = RecordingFetcher(client, fetch_settings)
+            fetcher = RecordingFetcher(
+                client,
+                fetch_settings,
+                coordination=RedisRequestGate(
+                    redis, redis_settings, request_timeout_s=fetch_settings.crawl_total_timeout_s
+                ),
+            )
             service = CrawlService(
                 sessions, fetcher, SnapshotStore(s3, storage_settings.snapshot_bucket)
             )
@@ -168,6 +184,7 @@ async def run_once(max_documents: int, feed_sample: Path | None, source_name: st
             )
             return 0 if summary.status == "succeeded" else 1
     finally:
+        await redis.aclose()
         s3.close()
         engine.dispose()
 

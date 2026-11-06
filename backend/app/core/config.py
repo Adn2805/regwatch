@@ -32,6 +32,7 @@ class FetchSettings(BaseSettings):
 
     crawl_contact_email: SecretStr = SecretStr("contact@example.invalid")
     crawl_timeout_s: float = Field(default=15.0, gt=0, allow_inf_nan=False)
+    crawl_total_timeout_s: float = Field(default=60, gt=0, le=3600, allow_inf_nan=False)
     crawl_delay_s: float = Field(default=2.0, gt=0, allow_inf_nan=False)
     crawl_max_retries: int = Field(default=2, ge=0, le=10)
     crawl_backoff_s: float = Field(default=1.0, gt=0, allow_inf_nan=False)
@@ -99,3 +100,6 @@ class RedisSettings(BaseSettings):
     redis_key_prefix: str = Field(default="regwatch", pattern=r"^[a-zA-Z0-9:_-]{1,80}$")
     rate_interval_s: float = Field(default=5, ge=0.001, le=3600, allow_inf_nan=False)
     rate_capacity: int = Field(default=1, ge=1, le=100)
+
+    domain_concurrency: int = Field(default=1, ge=1, le=100)
+    coordination_wait_s: float = Field(default=120, gt=0, le=3600, allow_inf_nan=False)
