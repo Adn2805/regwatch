@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a bounded crawl CLI with document-limit validation, success-only feed
+  sampling, sanitized diagnostics, and tests; RBI live verification stopped at
+  robots HTTP 418 without requesting the feed or any document.
+
 - Add Step 6 read endpoints for sources, documents, document versions, and changes,
   with Pydantic responses, bounded pagination, source/document/date filters,
   and explicit 404/422 responses.

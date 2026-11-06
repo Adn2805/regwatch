@@ -385,3 +385,38 @@ async def test_version_and_change_roll_back_together(env: CrawlEnvironment) -> N
     retry = await env.service.run(env.source_id)
     assert_counts(retry, discovered=2, fetched=2, new_versions=1, unchanged=1)
     assert env.totals() == (2, 3, 1)
+
+
+@pytest.mark.asyncio
+async def test_document_limit_processes_only_first_unique_document(env: CrawlEnvironment) -> None:
+    first = await env.service.run(env.source_id, max_documents=1)
+    assert_counts(first, discovered=2, fetched=1, new_versions=1)
+    assert env.totals() == (1, 1, 0)
+    assert not any("Id=10002" in request for request in env.regulator.requests)
+    repeat = await env.service.run(env.source_id, max_documents=1)
+    assert_counts(repeat, discovered=2, fetched=1, unchanged=1)
+    assert env.totals() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_bad_document_limit_has_no_crawl_or_http_side_effect(env: CrawlEnvironment) -> None:
+    with pytest.raises(ValueError, match="max_documents"):
+        await env.service.run(env.source_id, max_documents=0)
+    assert env.regulator.requests == []
+    with env.sessions() as session:
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(CrawlRun)
+                .where(CrawlRun.source_id == env.source_id)
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_discovery_failure_exposes_exact_sanitized_error(env: CrawlEnvironment) -> None:
+    env.regulator.feed = b"<html>not an RSS feed</html>"
+    summary = await env.service.run(env.source_id, max_documents=1)
+    assert summary.status == "failed"
+    assert summary.errors == ("AdapterParseError: Expected an RSS 2.0 feed",)

@@ -439,3 +439,19 @@ succeeded without changing the application. The 154 warnings consist of the
 existing SDK UTC deprecation plus a Starlette/AnyIO compatibility deprecation;
 they remain visible. API tests and all existing tests passed. These are
 functional checks, not load benchmarks or a completed Phase 1 gate.
+
+
+## Bounded crawl CLI
+
+The explicit command `docker compose run --rm --no-deps migrate python -m
+app.crawl.cli --max-documents 3` runs at most three unique documents through the
+normal fetcher and service. It requires a non-placeholder contact in ignored
+`.env`, never reactivates a paused source, and enforces at least five-second
+pacing plus any larger Crawl-delay. Optional `--feed-sample PATH` writes a
+trimmed listing only after success; it reuses fetched bytes without another
+listing request. Output contains counts and sanitized errors/status traces,
+not contact headers or credentials.
+
+The initial RBI live attempt stopped at robots HTTP 418 with paused=1 and all
+other counts zero. No feed/document request or real fixture was produced.
+RBI remains paused and must be exercised through fixtures, not retried live.

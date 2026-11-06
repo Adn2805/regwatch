@@ -8,10 +8,10 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.s3 import SnapshotStore
-from app.crawl.adapters.base import Publication, SourceAdapter
+from app.core.s3 import SnapshotStorageError, SnapshotStore
+from app.crawl.adapters.base import AdapterParseError, Publication, SourceAdapter
 from app.crawl.adapters.rbi import RbiAdapter
-from app.crawl.errors import RobotsDisallowed, SourcePaused
+from app.crawl.errors import FetchError, RobotsDisallowed, SourcePaused
 from app.crawl.fetcher import Fetcher
 from app.crawl.repository import CrawlRepository, RunCounts
 from app.crawl.snapshot import record_version
@@ -23,6 +23,7 @@ class CrawlSummary:
     status: str
     reason: str | None
     counts: RunCounts
+    errors: tuple[str, ...] = ()
 
 
 class CrawlService:
@@ -40,7 +41,10 @@ class CrawlService:
         self._adapters = adapters if adapters is not None else {"rbi": RbiAdapter()}
         self._clock = clock
 
-    async def run(self, source_id: UUID) -> CrawlSummary:
+    async def run(self, source_id: UUID, *, max_documents: int | None = None) -> CrawlSummary:
+        if max_documents is not None and not 1 <= max_documents <= 100:
+            raise ValueError("max_documents must be between 1 and 100")
+        errors: list[str] = []
         started = self._clock()
         context = await asyncio.to_thread(self._repository.start, source_id)
         counts = RunCounts()
@@ -61,7 +65,10 @@ class CrawlService:
                     unique.setdefault(publication.canonical_url, publication)
                 counts.discovered = len(unique)
                 await asyncio.to_thread(self._repository.checkpoint, context.run_id, counts)
-                for publication in unique.values():
+                selected = list(unique.values())
+                if max_documents is not None:
+                    selected = selected[:max_documents]
+                for publication in selected:
                     try:
                         document_id = await asyncio.to_thread(
                             self._repository.upsert_document, source_id, publication
@@ -83,12 +90,14 @@ class CrawlService:
                             counts.new_versions += 1
                         else:
                             counts.unchanged += 1
-                    except SourcePaused:
+                    except SourcePaused as error:
+                        errors.append(safe_error(error))
                         counts.paused += 1
                         status = "paused"
                         reason = "Source paused: robots policy unavailable or unparseable"
                         break
                     except Exception as error:
+                        errors.append(safe_error(error))
                         # Isolate document failures, but do not swallow cancellation or process exits.
                         counts.failed += 1
                         if reason is None:
@@ -96,13 +105,16 @@ class CrawlService:
                     await asyncio.to_thread(self._repository.checkpoint, context.run_id, counts)
                 else:
                     status = "failed" if counts.failed else "succeeded"
-        except SourcePaused:
+        except SourcePaused as error:
+            errors.append(safe_error(error))
             counts.paused += 1
             status, reason = "paused", "Source paused: robots policy unavailable or unparseable"
-        except RobotsDisallowed:
+        except RobotsDisallowed as error:
+            errors.append(safe_error(error))
             counts.paused += 1
             status, reason = "paused", "Robots policy disallows source listing"
         except Exception as error:
+            errors.append(safe_error(error))
             counts.failed += 1
             status, reason = "failed", f"Discovery failed: {type(error).__name__}"
         except BaseException:
@@ -124,4 +136,11 @@ class CrawlService:
             reason,
             (self._clock() - started) * 1000,
         )
-        return CrawlSummary(context.run_id, status, reason, counts)
+        return CrawlSummary(context.run_id, status, reason, counts, tuple(errors))
+
+
+def safe_error(error: Exception) -> str:
+    """Known layers already sanitize messages; never expose arbitrary SQL/SDK exceptions."""
+    if isinstance(error, (AdapterParseError, FetchError, SnapshotStorageError)):
+        return f"{type(error).__name__}: {error}"
+    return type(error).__name__
