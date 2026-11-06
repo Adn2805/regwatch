@@ -186,6 +186,24 @@ flowchart LR
   gitignored local_only and are excluded from Docker build contexts. CI runs the
   deterministic suite with local services, never against regulator sites.
 
+- 2026-11-06: The explicit live CLI supports SEBI with at least five-second
+  per-host delays, zero retries and zero redirects. Its request guard allows only
+  the approved listing, robots.txt and circular HTML paths on www.sebi.gov.in;
+  non-HTML bodies are rejected before download. The CLI stops on document errors,
+  while ordinary crawl-service calls retain document-failure isolation. This
+  prevents a failed limited verification from making further page requests.
+
+## Live verification
+
+On 2026-11-06, RBI returned HTTP 418 for robots.txt; it remains paused and
+fixtures-only. SEBI was verified live with two circular HTML documents on each
+of two runs, using at least 5-second delays, zero retries and no PDF requests.
+The first run created two versions; the second created zero new versions and
+reported two unchanged documents. No fetched content was committed.
+
+Run IDs: `fcb5a0a6-65ae-431a-bb5e-3252627b4e43` (first) and
+`5fdb5410-01ad-4606-b5f0-1af89520e4c5` (repeat).
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.

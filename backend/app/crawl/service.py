@@ -44,7 +44,9 @@ class CrawlService:
         )
         self._clock = clock
 
-    async def run(self, source_id: UUID, *, max_documents: int | None = None) -> CrawlSummary:
+    async def run(
+        self, source_id: UUID, *, max_documents: int | None = None, stop_on_error: bool = False
+    ) -> CrawlSummary:
         if max_documents is not None and not 1 <= max_documents <= 100:
             raise ValueError("max_documents must be between 1 and 100")
         errors: list[str] = []
@@ -105,6 +107,9 @@ class CrawlService:
                         counts.failed += 1
                         if reason is None:
                             reason = f"Document processing failed: {type(error).__name__}"
+                        if stop_on_error:
+                            status = "failed"
+                            break
                     await asyncio.to_thread(self._repository.checkpoint, context.run_id, counts)
                 else:
                     status = "failed" if counts.failed else "succeeded"

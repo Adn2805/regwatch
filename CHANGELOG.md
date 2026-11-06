@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Extend the bounded CLI to SEBI with HTML-only destinations, zero retries or
+  redirects, at least 5-second delays, and stop-on-error execution.
+- Record successful two-document live SEBI repeat-crawl deduplication; RBI
+  remains fixtures-only after robots HTTP 418.
+
 - Add first-page SEBI discovery with five-row metadata fixture, UTC dates,
   SEBI-only canonical links, skipped-row diagnostics, and offline parser tests.
 - Exclude full local captures from Git and Docker contexts; add committed-history

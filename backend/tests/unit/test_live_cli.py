@@ -34,3 +34,32 @@ def test_feed_trimming_keeps_rss_structure(tmp_path: Path) -> None:
     publications = RbiAdapter().discover(destination.read_bytes(), base_url=FEED_URL)
     assert len(publications) == 1
     assert publications[0].title == "Example KYC & reporting notification"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.sebi.gov.in/sebi_data/attachdocs/test.pdf",
+        "https://www.sebi.gov.in/legal/circulars/test.pdf",
+        "https://outside.invalid/legal/circulars/test.html",
+    ],
+)
+def test_live_sebi_blocks_unapproved_destinations(url: str) -> None:
+    import httpx
+    from app.crawl.cli import check_sebi_request
+    from app.crawl.errors import FetchError
+
+    with pytest.raises(FetchError):
+        check_sebi_request(httpx.URL(url))
+
+
+def test_live_sebi_allows_only_listing_robots_and_circular_html() -> None:
+    import httpx
+    from app.crawl.cli import SEBI_URL, check_sebi_request
+
+    for url in [
+        SEBI_URL,
+        "https://www.sebi.gov.in/robots.txt",
+        "https://www.sebi.gov.in/legal/circulars/test.html",
+    ]:
+        check_sebi_request(httpx.URL(url))
