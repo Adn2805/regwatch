@@ -5,7 +5,7 @@ adapters, robots-aware bounded HTTP fetching, immutable raw snapshots, version
 deduplication, naive changes, crawl-run auditing and four read endpoints. SEBI was
 verified live by an explicit CLI invocation; no automatic scheduler exists. RBI
 remains paused and fixtures-only. Meaningful diffs and distributed reliability
-are Phase 2 work.
+are Phase 2 work; Batch A now supplies distributed fetching controls.
 
 ```mermaid
 flowchart LR
@@ -16,7 +16,7 @@ flowchart LR
   API[FastAPI read endpoints] --> P
   M[Alembic migrations] --> P
   B[Bucket initializer] --> S
-  R[(Redis: available; distributed controls arrive in Phase 2)]
+  F --> R[(Redis: rate, concurrency and robots coordination)]
 ```
 
 ## Decision log
@@ -215,6 +215,17 @@ flowchart LR
   crawling. Rates/caps assume consistently configured workers and durable Redis;
   Redis data loss or a process suspended beyond its lease is not exactly-once
   network execution. Scheduler ownership recovery remains Batch B work.
+
+- 2026-11-06: Phase 2 A3 shares robots records by origin in Redis, caching both
+  valid policies and unavailable outcomes for the configured TTL. Owner-checked
+  Lua renews refresh leases and atomically publishes/unlocks, preventing an old
+  refresher from overwriting a successor. Cache corruption, Redis failure, lost
+  ownership and exhausted waits pause safely; exception details are never cached.
+  Existing process-local caches remain test injection options, not an outage
+  fallback. Full-jitter retries sample [0, capped exponential backoff]; capped
+  Retry-After and request pacing remain lower bounds. Required inter-request
+  delays force effective bucket capacity one, even with a larger configured
+  capacity, so Crawl-delay cannot be defeated by bursts. Tests inject random values.
 
 ## Live verification
 

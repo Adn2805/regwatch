@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import FetchSettings, StorageSettings, RedisSettings
 from app.core.redis import make_redis_client
 from app.crawl.concurrency import RedisRequestGate
+from app.crawl.robots import PolicyCache
+from app.crawl.robots_shared import RedisRobotsCache
 from app.core.db import make_engine
 from app.core.s3 import SnapshotStore, make_s3_client
 from app.crawl.fetcher import Fetcher, FetchResult
@@ -72,8 +74,9 @@ class RecordingFetcher(Fetcher):
         settings: FetchSettings,
         *,
         coordination: RedisRequestGate | None = None,
+        robots_cache: PolicyCache | None = None,
     ) -> None:
-        super().__init__(client, settings, coordination=coordination)
+        super().__init__(client, settings, coordination=coordination, robots_cache=robots_cache)
         self.feed: bytes | None = None
 
     async def fetch(self, url: str) -> FetchResult:
@@ -150,6 +153,9 @@ async def run_once(max_documents: int, feed_sample: Path | None, source_name: st
                 fetch_settings,
                 coordination=RedisRequestGate(
                     redis, redis_settings, request_timeout_s=fetch_settings.crawl_total_timeout_s
+                ),
+                robots_cache=RedisRobotsCache(
+                    redis, redis_settings, ttl_s=fetch_settings.robots_cache_ttl_s
                 ),
             )
             service = CrawlService(

@@ -72,8 +72,8 @@ Step 1 verification on 2026-11-05 (Docker Desktop, Linux containers):
 | Migration downgrade, upgrade, repeat upgrade | Successful on empty development data |
 | Repeated bucket initialization | Successful; bucket exists, anonymous access disabled |
 
-These are functional checks, not load benchmarks or a completed Phase 1 gate.
-GitHub CI has not been configured or run in Step 1.
+These historical Step 1 checks are functional checks, not load benchmarks.
+The completed Phase 1 gate and CI result are summarized above.
 
 ## Verify fixture-based discovery
 
@@ -114,7 +114,7 @@ live RBI compatibility or complete the Phase 1 gate.
 - `changes` joins two distinct versions of the same document. Composite foreign
   keys reject accidental comparisons between unrelated documents.
 - `crawl_runs` records attempt status and timing. Queue leases and crash recovery
-  remain Phase 2 work.
+  were deferred to Phase 2; see the current Batch A notes below.
 
 All timestamps use PostgreSQL `timestamptz`. The generated search vector follows
 the text automatically; its GIN index enables full-text lookup later. The vector
@@ -177,8 +177,8 @@ is rejected, and oversize streams close without buffering the remaining body.
 The layer emits no payload/request logs; contact settings are masked in repr,
 and request URLs/headers are excluded from error messages.
 
-Live crawling remains disabled. Parsing, scheduled workers, CI, and live-source
-verification remain before the complete Phase 1 gate can pass.
+Live crawling requires an explicit CLI invocation and a real contact setting.
+Phase 1 live verification and CI passed; parsing and scheduled workers are Phase 2 work.
 
 
 Step 3 verification on 2026-11-06, using the final Docker image:
@@ -266,7 +266,7 @@ Strict mypy: Success: no issues found in 27 source files
 
 The 69 warnings are the pinned SDK's UTC deprecation warning during local S3
 request signing. Tests passed with the warnings visible. These are functional
-checks, not load benchmarks; the complete Phase 1 gate remains pending.
+checks, not load benchmarks. The later completed Phase 1 gate is summarized above.
 
 
 ## Step 5: crawl service and deduplication
@@ -339,7 +339,8 @@ proves duplicate-free data retries, not automatic crash recovery.
 
 The compression error is explicitly distinct: `Unexpected response content
 encoding; expected identity`. The exact message is asserted in the tests.
-The complete Phase 1 gate remains pending; no Phase 2 work has started.
+Phase 1 is complete. Phase 2 Batch A adds distributed fetching controls;
+source leases and abandoned-run recovery remain Batch B work.
 
 
 Step 5 verification on 2026-11-06, final Docker image:
@@ -425,9 +426,9 @@ continue to use only local PostgreSQL/MinIO and mocked regulator HTTP.
 
 The stuck-running audit decision is recorded in ARCHITECTURE.md: Phase 2 will
 add lease expiry and recovery/reconciliation. No recovery implementation or
-live RBI request was added in Step 6. The live robots/feed check and a small
-real crawl remain a separate task before the complete Phase 1 gate, which also
-still requires CI and any other outstanding checklist items.
+live RBI request was added in Step 6. Later verification kept RBI fixtures-only
+after robots HTTP 418, verified SEBI repeat-crawl deduplication, and passed CI
+and the fresh-clone startup gate.
 
 
 Step 6 verification on 2026-11-06:
@@ -448,7 +449,7 @@ An initial `localhost` probe did not reach the container; the direct probe
 succeeded without changing the application. The 154 warnings consist of the
 existing SDK UTC deprecation plus a Starlette/AnyIO compatibility deprecation;
 they remain visible. API tests and all existing tests passed. These are
-functional checks, not load benchmarks or a completed Phase 1 gate.
+historical functional checks, not load benchmarks; the final Phase 1 gate passed later.
 
 
 ## Bounded crawl CLI
@@ -563,7 +564,7 @@ possible secret.
 
 Phase 2 Batch A step 1 adds a standalone Redis token bucket. Run its real-Redis
 checks with `docker compose run --rm --no-deps migrate pytest tests/integration/test_redis_ratelimit.py -q`
-after rebuilding `migrate`. The component is wired into HTTP fetching in step 2.
+after rebuilding `migrate`. The component is now wired into CLI HTTP fetching.
 
 Phase 2 A2 wires shared Redis limits into the explicit CLI. Every request attempt
 (including robots/retries/redirects) is admitted; concurrency permits last through
@@ -571,3 +572,14 @@ body closure. Configure `DOMAIN_CONCURRENCY`, `RATE_INTERVAL_S`, `RATE_CAPACITY`
 `COORDINATION_WAIT_S` and `CRAWL_TOTAL_TIMEOUT_S` consistently across workers.
 Redis failure stops fetching. Run `tests/integration/test_redis_fetcher.py` in
 Compose to verify shared limits and cancellation with mocked HTTP.
+
+Phase 2 A3 shares origin-scoped robots policies (including paused outcomes) in
+Redis. `ROBOTS_CACHE_TTL_S` defaults to 3600; `ROBOTS_REFRESH_LEASE_S` controls the
+renewable refresh lock. Lost ownership, corrupted cache records and Redis outages
+pause fetching; there is no fallback that assumes permission. Retry backoff uses
+full jitter while honoring capped Retry-After and configured/Crawl-delay pacing.
+Run `tests/integration/test_shared_robots.py` and
+`tests/unit/test_retry_jitter.py` for real-Redis/mocked-HTTP verification.
+
+A required request/Crawl-delay forces effective token capacity one, even if
+`RATE_CAPACITY` is larger; burst configuration cannot relax politeness.

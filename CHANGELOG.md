@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Share positive/paused robots records with renewable, owner-checked refresh locks;
+  add full-jitter retry backoff and deterministic failure tests (Phase 2 A3).
+
 - Apply Redis token buckets and expiring concurrency permits to CLI requests,
   with total HTTP deadlines and cancellation/failure-path tests (Phase 2 A2).
 

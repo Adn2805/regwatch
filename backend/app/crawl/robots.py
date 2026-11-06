@@ -76,6 +76,10 @@ class CacheEntry:
 RobotsLoader = Callable[[str], Awaitable[tuple[int, bytes]]]
 
 
+class PolicyCache(Protocol):
+    async def policy(self, url: str, load: RobotsLoader) -> RobotsPolicy: ...
+
+
 class RobotsCache:
     def __init__(self, ttl_s: float, clock: Callable[[], float]) -> None:
         self._ttl_s = ttl_s

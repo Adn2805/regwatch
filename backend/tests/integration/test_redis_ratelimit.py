@@ -64,8 +64,10 @@ async def test_refill_and_safe_idle_expiry(coordination: tuple[Redis, RedisSetti
 async def test_stricter_delay_and_burst_capacity(coordination: tuple[Redis, RedisSettings]) -> None:
     client, settings = coordination
     bucket = RedisTokenBucket(client, settings.model_copy(update={"rate_capacity": 2}))
+    assert (await bucket.admit("burst.test")).allowed
+    assert (await bucket.admit("burst.test")).allowed
+    assert not (await bucket.admit("burst.test")).allowed
     assert (await bucket.admit("example.test", minimum_interval_s=60)).allowed
-    assert (await bucket.admit("example.test")).allowed
     denied = await bucket.admit("example.test")
     assert not denied.allowed and denied.retry_after_s > 50
 

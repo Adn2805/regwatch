@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -14,7 +15,7 @@ import httpx
 from app.core.config import FetchSettings
 from app.crawl.adapters.base import AdapterParseError, canonicalize_url
 from app.crawl.errors import FetchError, ResponseTooLarge, RobotsDisallowed
-from app.crawl.robots import RobotsCache, RobotsPolicy
+from app.crawl.robots import RobotsCache, RobotsPolicy, PolicyCache
 from app.crawl.concurrency import RedisRequestGate
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
@@ -58,6 +59,8 @@ class Fetcher:
         settings: FetchSettings | None = None,
         *,
         coordination: RedisRequestGate | None = None,
+        robots_cache: PolicyCache | None = None,
+        jitter: Callable[[float, float], float] = random.uniform,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -66,7 +69,12 @@ class Fetcher:
         self._client = client  # Caller owns and closes the injected client.
         self._settings = settings if settings is not None else FetchSettings()
         self._clock, self._sleep, self._now = clock, sleep, now
-        self._robots = RobotsCache(self._settings.robots_cache_ttl_s, clock)
+        self._robots: PolicyCache = (
+            robots_cache
+            if robots_cache is not None
+            else RobotsCache(self._settings.robots_cache_ttl_s, clock)
+        )
+        self._jitter = jitter
         self._locks: dict[str, asyncio.Lock] = {}
         self._finished: dict[str, float] = {}
         self._delays: dict[str, float] = {}
@@ -134,7 +142,9 @@ class Fetcher:
             cap = self._settings.crawl_retry_after_cap_s
             backoff = min(cap, self._settings.crawl_backoff_s * 2**attempt)
             requested = retry_after_seconds(retry_after, self._now(), cap)
-            await self._sleep(max(backoff, requested if requested is not None else 0.0))
+            await self._sleep(
+                max(self._jitter(0.0, backoff), requested if requested is not None else 0.0)
+            )
         raise AssertionError("Retry loop must return or raise")
 
     async def _once(self, url: str) -> FetchResult:

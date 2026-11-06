@@ -66,6 +66,7 @@ async def make_rig() -> AsyncIterator[RigFactory]:
         fetcher = Fetcher(
             client,
             FetchSettings(**values),
+            jitter=lambda low, high: high,  # Existing cases exercise the upper backoff bound.
             clock=clock.now,
             sleep=clock.sleep,
             now=lambda: datetime(2026, 11, 6, tzinfo=timezone.utc),

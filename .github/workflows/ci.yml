@@ -46,7 +46,7 @@ jobs:
         run: docker compose run --rm --no-deps --volume "$PWD/scripts:/scripts:ro" migrate ruff check . /scripts
       - name: Strict types
         run: docker compose run --rm --no-deps --volume "$PWD/scripts:/scripts:ro" migrate mypy app migrations tests /scripts
-      - name: Tests with local PostgreSQL and MinIO
+      - name: Tests with local PostgreSQL, Redis and MinIO
         run: docker compose run --rm --no-deps migrate pytest -q
       - name: Dependency logs on failure
         if: failure()

@@ -56,14 +56,15 @@ class RedisTokenBucket:
             raise ValueError("Minimum interval must be finite and nonnegative")
         key = host_key(self._settings.redis_key_prefix, host) + ":bucket"
         interval = max(self._settings.rate_interval_s, minimum_interval_s)
+        # A required inter-request delay forbids bursts even when the generic
+        # bucket was configured with a larger capacity.
+        capacity = 1 if minimum_interval_s > 0 else self._settings.rate_capacity
         try:
             # redis-py's shared command annotation includes its synchronous client;
             # this owned client is always redis.asyncio.Redis.
             result = await cast(
                 Awaitable[list[int]],
-                self._client.eval(
-                    SCRIPT, 1, key, str(interval * 1000), str(self._settings.rate_capacity)
-                ),
+                self._client.eval(SCRIPT, 1, key, str(interval * 1000), str(capacity)),
             )
             allowed, wait_ms, now_ms = result
             return Admission(bool(int(allowed)), float(wait_ms) / 1000, int(now_ms))
