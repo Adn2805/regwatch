@@ -200,6 +200,12 @@ flowchart LR
   while ordinary crawl-service calls retain document-failure isolation. This
   prevents a failed limited verification from making further page requests.
 
+- 2026-11-06: Phase 2 A1 adds standalone Redis token buckets. Atomic Lua uses
+  Redis time; normalized hostnames share capacity across processes and ports.
+  Capacity defaults to one. Idle expiry occurs only after full natural refill;
+  stricter observed rates persist until idle expiry. Client calls have bounded
+  timeouts and no automatic retries. Fetcher integration follows in A2.
+
 ## Live verification
 
 On 2026-11-06, RBI returned HTTP 418 for robots.txt; it remains paused and

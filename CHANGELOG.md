@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add standalone atomic Redis token buckets, bounded client settings, and real-Redis
+  concurrency/refill/failure tests (Phase 2 A1).
+
 - Correct Phase 1 summary and functional results; tag its verified commit as
   v0.1-phase1. Begin Phase 2 in reviewed batches, without regulator requests.
 

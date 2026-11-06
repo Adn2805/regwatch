@@ -560,3 +560,7 @@ GitHub Actions runs lint, strict types and tests against local PostgreSQL/MinIO;
 paths, known local secret values, token patterns and non-placeholder email addresses,
 without printing matched values. Pattern scanning cannot prove absence of every
 possible secret.
+
+Phase 2 Batch A step 1 adds a standalone Redis token bucket. Run its real-Redis
+checks with `docker compose run --rm --no-deps migrate pytest tests/integration/test_redis_ratelimit.py -q`
+after rebuilding `migrate`. The component is wired into HTTP fetching in step 2.

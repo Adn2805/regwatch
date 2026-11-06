@@ -83,3 +83,19 @@ class StorageSettings(BaseSettings):
         if value.username or value.password or value.query or value.fragment or value.path != "/":
             raise ValueError("S3 endpoint must be an HTTP(S) origin without credentials")
         return value
+
+
+class RedisSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        case_sensitive=False, extra="ignore", hide_input_in_errors=True
+    )
+
+    redis_host: str = Field(default="redis", min_length=1)
+    redis_port: int = Field(default=6379, ge=1, le=65535)
+    redis_db: int = Field(default=0, ge=0, le=15)
+    redis_password: SecretStr | None = None
+    redis_timeout_s: float = Field(default=2, gt=0, le=30, allow_inf_nan=False)
+    redis_max_connections: int = Field(default=50, ge=1, le=1000)
+    redis_key_prefix: str = Field(default="regwatch", pattern=r"^[a-zA-Z0-9:_-]{1,80}$")
+    rate_interval_s: float = Field(default=5, ge=0.001, le=3600, allow_inf_nan=False)
+    rate_capacity: int = Field(default=1, ge=1, le=100)
