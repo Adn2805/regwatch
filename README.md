@@ -7,7 +7,7 @@ auditing, four read endpoints and Docker-based GitHub Actions CI.
 
 RBI is fixtures-only after robots HTTP 418. SEBI discovery covers the first
 listing page only; a two-document live repeat crawl created zero new versions.
-The CLI is explicitly invoked; there is no automatic scheduler yet.
+The CLI is explicitly invoked; the Arq scheduler is disabled by default.
 
 ## Start
 
@@ -608,3 +608,22 @@ The additive migration has a downgrade tested with populated disposable database
 A validated private `pg_dump` backup preceded the local upgrade. The concurrency/
 crash gate passed 20/20 rounds across 16 cases, including separate claim processes
 and independent connections; no retry rounds or inter-round sleeps were added.
+
+Phase 2 B6 adds Arq worker/scheduler services to Compose. `SCHEDULER_ENABLED=false`
+is the default: startup does not crawl regulators. Do not enable it until live
+access is explicitly approved and a non-placeholder contact is configured.
+The worker uses the normal robots-aware Redis-limited fetcher and per-document
+conditional GET; both worker and explicit CLI writes carry a Postgres lease.
+Heartbeat loss aborts work, and a completed claim retried later is a no-op.
+Postgres remains authoritative across a claim/enqueue failure: the source stays
+due and can be reclaimed after lease expiry. There is no cross-system transaction.
+Tests in `tests/integration/test_workers.py` use real Postgres/Redis/MinIO and mock
+all HTTP. They SIGKILL a real Arq process between upload and version persistence,
+then verify replacement-worker recovery with four versions and two unique changes
+from a two-document changed-content fixture. No full regulator content is committed.
+
+Batch B verification: the final packaged Docker image passed Ruff, strict mypy
+(68 source files) and 429 tests. All 21 selected concurrency/crash cases passed
+20 consecutive fresh-process rounds with no failures or skips. Compose worker
+and scheduler startup passed with scheduling disabled and an empty default queue;
+the existing two documents and two versions remained present.

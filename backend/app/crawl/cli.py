@@ -12,7 +12,7 @@ from defusedxml import ElementTree  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import FetchSettings, StorageSettings, RedisSettings
+from app.core.config import FetchSettings, StorageSettings, RedisSettings, LeaseSettings
 from app.core.redis import make_redis_client
 from app.crawl.concurrency import RedisRequestGate
 from app.crawl.robots import PolicyCache
@@ -22,7 +22,9 @@ from app.core.s3 import SnapshotStore, make_s3_client
 from app.crawl.fetcher import Fetcher, FetchResult
 from app.crawl.conditional import Validators
 from app.crawl.errors import FetchError
-from app.crawl.service import CrawlService, safe_error
+from app.crawl.service import CrawlService, CrawlSummary, safe_error
+from app.schedule.leases import LeaseRepository
+from app.schedule.worker import execute_with_heartbeat
 from app.models.schema import Source
 
 FEED_URL = "https://www.rbi.org.in/notifications_rss.xml"
@@ -40,11 +42,7 @@ def document_limit(value: str) -> int:
 
 
 def require_real_contact(settings: FetchSettings) -> None:
-    domain = settings.crawl_contact_email.get_secret_value().split("@")[-1].lower()
-    if domain in {"example.com", "example.org", "example.net"} or domain.endswith(
-        (".invalid", ".test", ".example", ".localhost")
-    ):
-        raise ValueError("Configure a non-placeholder CRAWL_CONTACT_EMAIL before a live crawl")
+    settings.require_real_contact()
 
 
 def rbi_source(sessions: sessionmaker[Session], source_name: str = "rbi") -> UUID:
@@ -146,6 +144,15 @@ async def run_once(max_documents: int, feed_sample: Path | None, source_name: st
 
     try:
         source_id = await asyncio.to_thread(rbi_source, sessions, source_name)
+        lease_settings = LeaseSettings()
+        claims = await asyncio.to_thread(
+            LeaseRepository(sessions, lease_s=lease_settings.lease_duration_s).claim_due,
+            source_ids=[source_id],
+            force=True,
+        )
+        if not claims:
+            raise FetchError("Source is paused or already leased; no HTTP requests issued")
+        claim = claims[0]
         async with httpx.AsyncClient(
             event_hooks={"request": [request_hook], "response": [response_hook]}
         ) as client:
@@ -160,9 +167,13 @@ async def run_once(max_documents: int, feed_sample: Path | None, source_name: st
                 ),
             )
             service = CrawlService(
-                sessions, fetcher, SnapshotStore(s3, storage_settings.snapshot_bucket)
+                sessions, fetcher, SnapshotStore(s3, storage_settings.snapshot_bucket), claim=claim
             )
-            summary = await service.run(source_id, max_documents=max_documents, stop_on_error=True)
+
+            async def operation() -> CrawlSummary:
+                return await service.run(source_id, max_documents=max_documents, stop_on_error=True)
+
+            summary = await execute_with_heartbeat(sessions, claim, lease_settings, operation)
             sample_saved = False
             if summary.status == "succeeded" and feed_sample is not None:
                 if fetcher.feed is None:

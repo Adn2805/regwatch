@@ -3,7 +3,8 @@
 Phase 1 is complete: infrastructure and migrations, fixture-tested RBI and SEBI
 adapters, robots-aware bounded HTTP fetching, immutable raw snapshots, version
 deduplication, naive changes, crawl-run auditing and four read endpoints. SEBI was
-verified live by an explicit CLI invocation; no automatic scheduler exists. RBI
+verified live by an explicit CLI invocation; automatic scheduling is opt-in and
+disabled by default. RBI
 remains paused and fixtures-only. Meaningful diffs and distributed reliability
 are Phase 2 work; Batch A now supplies distributed fetching controls.
 
@@ -248,6 +249,19 @@ flowchart LR
   clears ownership and advances next_crawl_at. SQL transactions stay short;
   PostgreSQL now() is transaction-start time, not a worker wall clock.
 
+- 2026-11-06: B6 uses Arq 0.26.3 with the existing Redis 5 client. Postgres
+  claims, not Redis delivery, own work. Queue job IDs include claim tokens;
+  enqueue ambiguity retains leases until expiry rather than claiming atomic
+  Postgres/Redis delivery. Expired claims can be re-enqueued under new tokens.
+- 2026-11-06: B6 heartbeats every lease/3, cancels work on ownership loss, and
+  treats retries of this owner's committed completion as no-ops. A heartbeat
+  racing with successful completion checks the committed run before declaring
+  loss. HTTP/S3/SQL/queue waits are bounded; worker resources close at shutdown.
+- 2026-11-06: B6 scheduling defaults disabled. Compose can start the passive
+  scheduler and idle worker without regulator access. Live jobs require a real
+  contact; tests inject MockTransport and isolate real Postgres/Redis/MinIO data.
+  The explicit CLI now acquires a lease and uses the same heartbeat path.
+
 ## Live verification
 
 On 2026-11-06, RBI returned HTTP 418 for robots.txt; it remains paused and
@@ -281,19 +295,30 @@ Run IDs: `fcb5a0a6-65ae-431a-bb5e-3252627b4e43` (first) and
 7. Historical unleased running runs stay untouched; no inferred expiry or retrospective data updates.
 8. Test stale writers, heartbeat/expiry and simultaneous claimers first; use real PostgreSQL and 20x gates.
 
+## Batch B, Step 6 design
+
+1. PostgreSQL claims remain authoritative; Arq executes one job identified by the claim token.
+2. Claim-before-enqueue gaps are recovered by lease expiry, without a cross-system transaction or new tables.
+3. Workers check ownership before starting and fence every DB write through the Step 5 service.
+4. A heartbeat runs about every lease/3; loss cancels work, while completed-token retries are no-ops.
+5. Resources are owned by worker startup/shutdown; request clients close per crawl and errors stay sanitized.
+6. Scheduler is disabled by default; tests inject mocked HTTP and use real PostgreSQL, Redis and MinIO.
+7. Test concurrent scheduler processes, enqueue failure, heartbeat loss and SIGKILL after upload before version save.
+8. Run full Docker gates plus 20 fresh-process repetitions; no live regulator requests.
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.
 The crawl service orchestrates discovery, fetch, immutable storage, version
 deduplication, and naive changes. Parsing/normalization and meaningful diffs
 remain unimplemented; run metadata reflects raw-byte processing only.
-The four read HTTP endpoints are implemented. No lease scheduler or notifications exist yet. RBI discovery
+The four read HTTP endpoints are implemented. Arq workers and a disabled-by-default
+leased scheduler exist; notifications remain unimplemented. RBI discovery
 is tested against synthetic RSS only; compatibility with the live feed remains
 unverified. RBI robots returned HTTP 418; RBI remains fixtures-only. Tests inject MockTransport and fake clocks;
 the new network tests also run with Docker networking disabled. HTTP destinations
 are validated and policy-checked; source enablement and site-terms review remain
 manual prerequisites for a future live crawl.
-Source validators are reserved fields; document-level validators can be added
-with Phase 2 conditional fetching. Parser yield counts extracted sections.
+Source-level validators remain reserved; document-level conditional GET is implemented. Parser yield counts extracted sections.
 
 100x scaling analysis will be grounded in later load measurements.

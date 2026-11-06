@@ -60,7 +60,7 @@ services:
   migrate:
     build: ./backend
     restart: on-failure:3
-    environment:
+    environment: &backend_environment
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -87,6 +87,12 @@ services:
       COORDINATION_WAIT_S: ${COORDINATION_WAIT_S:-120}
       ROBOTS_REFRESH_LEASE_S: ${ROBOTS_REFRESH_LEASE_S:-30}
       LEASE_DURATION_S: ${LEASE_DURATION_S:-60}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-false}
+      SCHEDULER_POLL_S: ${SCHEDULER_POLL_S:-5}
+      QUEUE_NAME: ${QUEUE_NAME:-regwatch:queue}
+      WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-4}
+      WORKER_JOB_TIMEOUT_S: ${WORKER_JOB_TIMEOUT_S:-600}
+      WORKER_MAX_DOCUMENTS: ${WORKER_MAX_DOCUMENTS:-100}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       SNAPSHOT_BUCKET: ${SNAPSHOT_BUCKET}
@@ -113,6 +119,29 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+  worker:
+    build: ./backend
+    command: [python, -m, app.schedule.worker]
+    environment: *backend_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      bucket-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  scheduler:
+    build: ./backend
+    command: [python, -m, app.schedule.scheduler]
+    environment: *backend_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

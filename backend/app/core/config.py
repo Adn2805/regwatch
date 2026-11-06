@@ -58,6 +58,13 @@ class FetchSettings(BaseSettings):
             raise ValueError("Contact must be a plain email address")
         return value
 
+    def require_real_contact(self) -> None:
+        domain = self.crawl_contact_email.get_secret_value().rsplit("@", 1)[-1].lower()
+        if domain in {"example.com", "example.org", "example.net"} or domain.endswith(
+            (".invalid", ".test", ".example", ".localhost")
+        ):
+            raise ValueError("Configure a non-placeholder CRAWL_CONTACT_EMAIL before a live crawl")
+
     def user_agent(self) -> str:
         return f"RegWatch/0.1 (+mailto:{self.crawl_contact_email.get_secret_value()})"
 
@@ -116,3 +123,15 @@ class LeaseSettings(BaseSettings):
     @property
     def heartbeat_interval_s(self) -> float:
         return self.lease_duration_s / 3
+
+
+class WorkerSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        case_sensitive=False, extra="ignore", hide_input_in_errors=True
+    )
+    scheduler_enabled: bool = False
+    scheduler_poll_s: float = Field(default=5, gt=0, le=3600, allow_inf_nan=False)
+    queue_name: str = Field(default="regwatch:queue", pattern=r"^[a-zA-Z0-9:_-]{1,80}$")
+    worker_max_jobs: int = Field(default=4, ge=1, le=100)
+    worker_job_timeout_s: float = Field(default=600, gt=0, le=3600, allow_inf_nan=False)
+    worker_max_documents: int = Field(default=100, ge=1, le=100)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add Arq scheduling/execution, heartbeat cancellation and completed-claim replay
+  protection; verify real-process scheduler and hard-kill recovery (B6).
+- Keep automatic scheduling disabled by default and route explicit CLI runs
+  through source leases; require real contact details before live jobs.
+
 - Add Postgres due-source leases, fenced worker writes, heartbeat and token-scoped
   recovery with an approved additive migration and private pre-migration backup (B5).
 
