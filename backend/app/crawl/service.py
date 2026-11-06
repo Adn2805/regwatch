@@ -94,7 +94,7 @@ class CrawlService:
                         errors.append(safe_error(error))
                         counts.paused += 1
                         status = "paused"
-                        reason = "Source paused: robots policy unavailable or unparseable"
+                        reason = str(error)
                         break
                     except Exception as error:
                         errors.append(safe_error(error))
@@ -108,7 +108,7 @@ class CrawlService:
         except SourcePaused as error:
             errors.append(safe_error(error))
             counts.paused += 1
-            status, reason = "paused", "Source paused: robots policy unavailable or unparseable"
+            status, reason = "paused", str(error)
         except RobotsDisallowed as error:
             errors.append(safe_error(error))
             counts.paused += 1

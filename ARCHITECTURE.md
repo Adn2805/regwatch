@@ -161,6 +161,9 @@ flowchart LR
   against real PostgreSQL in unique schemas so empty-result tests do not delete
   or depend on user data. No migration is needed for these read endpoints.
 
+- 2026-11-06: RBI returned 418 for robots.txt; the source is paused rather than guessing; RBI is tested via fixtures.
+- 2026-11-06: Preserve the robots HTTP status in cached paused reasons, including retry-exhausted 429 responses. A robots-only fetcher method supports policy inspection without requesting any content page.
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.

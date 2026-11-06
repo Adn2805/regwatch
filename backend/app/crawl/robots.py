@@ -70,6 +70,7 @@ def origin(url: str) -> str:
 class CacheEntry:
     policy: RobotsPolicy | None  # None caches an unavailable policy, never permission.
     expires_at: float
+    reason: str | None = None
 
 
 RobotsLoader = Callable[[str], Awaitable[tuple[int, bytes]]]
@@ -87,6 +88,7 @@ class RobotsCache:
         async with self._locks.setdefault(key, asyncio.Lock()):
             entry = self._entries.get(key)
             if entry is None or entry.expires_at <= self._clock():
+                reason = None
                 try:
                     status, body = await load(f"{key}/robots.txt")
                     if status in {404, 410}:
@@ -95,10 +97,17 @@ class RobotsCache:
                         policy = parse_robots(body)
                     else:
                         policy = None
-                except (FetchError, ValueError, UnicodeError):
+                        reason = f"Source paused: robots.txt returned HTTP {status}"
+                except (FetchError, ValueError, UnicodeError) as error:
                     policy = None
-                entry = CacheEntry(policy, self._clock() + self._ttl_s)
+                    if isinstance(error, FetchError) and error.status_code is not None:
+                        reason = f"Source paused: robots.txt returned HTTP {error.status_code}"
+                    else:
+                        reason = "Source paused: robots policy unavailable or unparseable"
+                entry = CacheEntry(policy, self._clock() + self._ttl_s, reason)
                 self._entries[key] = entry
             if entry.policy is None:
-                raise SourcePaused("Source paused: robots policy unavailable or unparseable")
+                raise SourcePaused(
+                    entry.reason or "Source paused: robots policy unavailable or unparseable"
+                )
             return entry.policy

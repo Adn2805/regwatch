@@ -14,7 +14,7 @@ import httpx
 from app.core.config import FetchSettings
 from app.crawl.adapters.base import AdapterParseError, canonicalize_url
 from app.crawl.errors import FetchError, ResponseTooLarge, RobotsDisallowed
-from app.crawl.robots import RobotsCache
+from app.crawl.robots import RobotsCache, RobotsPolicy
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
@@ -78,6 +78,10 @@ class Fetcher:
             raise FetchError(f"HTTP request failed with status {result.http_status}")
         return result
 
+    async def robots_policy(self, url: str) -> RobotsPolicy:
+        """Load the origin's policy without fetching the requested content page."""
+        return await self._robots.policy(_url(url, url), self._load_robots)
+
     async def _load_robots(self, url: str) -> tuple[int, bytes]:
         # Robots bootstrap (including its redirects) cannot recursively require
         # another robots fetch. All ordinary document hops do require a check.
@@ -104,7 +108,7 @@ class Fetcher:
     async def _request(self, url: str, *, check_robots: bool) -> FetchResult:
         for attempt in range(self._settings.crawl_max_retries + 1):
             if check_robots:
-                policy = await self._robots.policy(url, self._load_robots)
+                policy = await self.robots_policy(url)
                 host = urlsplit(url).hostname or ""
                 self._delays[host] = max(
                     self._settings.crawl_delay_s, policy.crawl_delay_s, self._delays.get(host, 0.0)
@@ -112,8 +116,10 @@ class Fetcher:
                 if not policy.allows(url):
                     raise RobotsDisallowed("Robots policy disallows request")
             retry_after: str | None = None
+            status_code: int | None = None
             try:
                 result = await self._once(url)
+                status_code = result.http_status
                 if result.http_status != 429 and not 500 <= result.http_status <= 599:
                     return result
                 if result.http_status in {429, 503}:
@@ -121,7 +127,7 @@ class Fetcher:
             except httpx.TransportError:
                 pass  # Retry transport failures, without exposing request/exception data.
             if attempt == self._settings.crawl_max_retries:
-                raise FetchError("HTTP retry budget exhausted") from None
+                raise FetchError("HTTP retry budget exhausted", status_code=status_code) from None
             cap = self._settings.crawl_retry_after_cap_s
             backoff = min(cap, self._settings.crawl_backoff_s * 2**attempt)
             requested = retry_after_seconds(retry_after, self._now(), cap)

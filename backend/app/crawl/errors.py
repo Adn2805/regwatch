@@ -2,7 +2,11 @@
 
 
 class FetchError(Exception):
-    """A request failed; the caller decides how to record the failed crawl."""
+    """A sanitized failure, with an optional HTTP status for policy decisions."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class SourcePaused(FetchError):

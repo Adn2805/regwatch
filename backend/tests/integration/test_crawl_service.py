@@ -270,7 +270,7 @@ async def test_robots_paused_source_stops_and_records_reason(env: CrawlEnvironme
     assert summary.status == "paused"
     assert_counts(summary, paused=1)
     assert env.totals() == (0, 0, 0)
-    assert "robots policy unavailable" in (env.run(summary.run_id).error or "")
+    assert env.run(summary.run_id).error == "Source paused: robots.txt returned HTTP 503"
     with env.sessions() as session:
         source = session.get(Source, env.source_id)
         assert source is not None and source.status == "paused"
@@ -420,3 +420,22 @@ async def test_discovery_failure_exposes_exact_sanitized_error(env: CrawlEnviron
     summary = await env.service.run(env.source_id, max_documents=1)
     assert summary.status == "failed"
     assert summary.errors == ("AdapterParseError: Expected an RSS 2.0 feed",)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 401, 403, 418, 429, 451, 499])
+async def test_robots_4xx_persists_paused_source_and_exact_reason(
+    env: CrawlEnvironment, status: int
+) -> None:
+    env.regulator.robots_status = status
+    summary = await env.service.run(env.source_id)
+    assert summary.status == "paused"
+    assert_counts(summary, paused=1)
+    expected = f"Source paused: robots.txt returned HTTP {status}"
+    assert summary.reason == expected
+    assert env.run(summary.run_id).error == expected
+    with env.sessions() as session:
+        source = session.get(Source, env.source_id)
+        assert source is not None and source.status == "paused"
+    assert env.regulator.requests == ["https://www.rbi.org.in/robots.txt"]
+    assert env.totals() == (0, 0, 0)

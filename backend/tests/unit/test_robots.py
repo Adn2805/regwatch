@@ -194,3 +194,30 @@ async def test_retry_rechecks_policy_after_cache_expiry(make_rig: RigFactory) ->
         await rig.fetcher.fetch(URL)
     assert policies == 2
     assert [request.url.path for request, _ in rig.calls].count("/notice") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [code for code in range(400, 500) if code not in {404, 410}])
+async def test_all_other_4xx_pause_with_cached_status_reason(
+    make_rig: RigFactory, status: int
+) -> None:
+    rig = make_rig(lambda request: reply(status), {"crawl_max_retries": 0})
+    for _ in range(2):
+        with pytest.raises(SourcePaused) as captured:
+            await rig.fetcher.fetch(URL)
+        assert str(captured.value) == f"Source paused: robots.txt returned HTTP {status}"
+    assert [request.url.path for request, _ in rig.calls] == ["/robots.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disallow", [False, True])
+async def test_robots_only_load_never_fetches_a_content_page(
+    make_rig: RigFactory, disallow: bool
+) -> None:
+    body = b"User-agent: *\nDisallow: /" if disallow else b"User-agent: *\nAllow: /"
+    rig = make_rig(
+        lambda request: reply(200, body), {"crawl_max_retries": 0, "crawl_max_redirects": 0}
+    )
+    policy = await rig.fetcher.robots_policy(URL)
+    assert policy.allows(URL) is not disallow
+    assert [request.url.path for request, _ in rig.calls] == ["/robots.txt"]

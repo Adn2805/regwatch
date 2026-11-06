@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Test every robots 4xx status except the allowed 404/410 cases; persist clear
+  HTTP status reasons for paused sources. Add robots-only policy inspection.
+- Keep RBI fixtures-only following its robots 418 response; no bypass is used.
+
 - Add a bounded crawl CLI with document-limit validation, success-only feed
   sampling, sanitized diagnostics, and tests; RBI live verification stopped at
   robots HTTP 418 without requesting the feed or any document.

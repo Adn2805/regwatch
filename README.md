@@ -455,3 +455,28 @@ not contact headers or credentials.
 The initial RBI live attempt stopped at robots HTTP 418 with paused=1 and all
 other counts zero. No feed/document request or real fixture was produced.
 RBI remains paused and must be exercised through fixtures, not retried live.
+
+
+Robots failure regression: every HTTP 4xx other than 404/410 pauses access,
+including 418 and retry-exhausted 429. A cached failure retains its exact safe
+status reason, e.g. `Source paused: robots.txt returned HTTP 418`. Crawl audit
+rows preserve that reason. The original first RBI run is not rewritten.
+404/410 retain the approved unrestricted-policy behavior. The public
+`Fetcher.robots_policy(url)` method loads policy through the same HTTP transport,
+User-Agent, timeouts, limits, pacing, and parser without fetching a content page.
+RBI remains fixtures-only and is not retried live.
+
+
+Robots-status verification on 2026-11-06:
+
+```text
+Offline robots unit tests: 129 passed in 0.34s
+Full local Docker suite: 308 passed, 188 warnings in 8.66s
+Ruff: All checks passed!
+Strict mypy: Success: no issues found in 40 source files
+```
+
+The warnings are the existing SDK UTC and Starlette/AnyIO deprecations. These
+checks used mocked regulator HTTP; RBI was not retried. A one-request SEBI
+robots-only probe is performed separately with retries and redirects disabled,
+using the normal crawler identity/transport. It does not crawl any content page.
