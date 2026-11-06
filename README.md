@@ -532,3 +532,21 @@ Strict mypy: Success: no issues found in 41 source files
 
 The staged fixture was verified byte-for-byte against the captured 101-byte
 response. Its original CRLF and trailing space are intentionally preserved.
+
+SEBI discovery currently supports only the first HTML listing page (`sample_1`).
+The committed `sebi_circulars_trimmed.html` fixture contains five metadata rows
+credited to SEBI; full captures stay private in gitignored `local_only/` and are
+excluded from Docker images. No circulars or PDFs are included. Date-only labels
+use midnight India converted to UTC. `SebiAdapter.skipped_rows` reports malformed
+and duplicate rows from its latest call; a missing table is an explicit failure.
+Run its offline tests with:
+
+```sh
+docker compose run --rm --no-deps migrate pytest tests/unit/test_sebi_adapter.py -q
+```
+
+GitHub Actions runs lint, strict types and tests against local PostgreSQL/MinIO;
+`python scripts/check_history.py` scans all reachable/reflog commits for private
+paths, known local secret values, token patterns and non-placeholder email addresses,
+without printing matched values. Pattern scanning cannot prove absence of every
+possible secret.

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.s3 import SnapshotStorageError, SnapshotStore
 from app.crawl.adapters.base import AdapterParseError, Publication, SourceAdapter
 from app.crawl.adapters.rbi import RbiAdapter
+from app.crawl.adapters.sebi import SebiAdapter
 from app.crawl.errors import FetchError, RobotsDisallowed, SourcePaused
 from app.crawl.fetcher import Fetcher
 from app.crawl.repository import CrawlRepository, RunCounts
@@ -38,7 +39,9 @@ class CrawlService:
     ) -> None:
         self._sessions, self._fetcher, self._store = sessions, fetcher, store
         self._repository = CrawlRepository(sessions)
-        self._adapters = adapters if adapters is not None else {"rbi": RbiAdapter()}
+        self._adapters = (
+            adapters if adapters is not None else {"rbi": RbiAdapter(), "sebi": SebiAdapter()}
+        )
         self._clock = clock
 
     async def run(self, source_id: UUID, *, max_documents: int | None = None) -> CrawlSummary:

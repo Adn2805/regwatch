@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add first-page SEBI discovery with five-row metadata fixture, UTC dates,
+  SEBI-only canonical links, skipped-row diagnostics, and offline parser tests.
+- Exclude full local captures from Git and Docker contexts; add committed-history
+  privacy checks and Docker-based GitHub Actions lint/type/integration checks.
+
 - Add Part 1 exact SEBI robots fixture and offline tests for empty Disallow
   semantics and restricted directory prefixes; no content pages are fetched.
 - Record SEBI source credit, private-storage limits, and portfolio disclaimer.

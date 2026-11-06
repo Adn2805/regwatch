@@ -174,6 +174,18 @@ flowchart LR
   and credited to SEBI. Copyright/permission requirements still apply. This is a
   portfolio project, not legal advice.
 
+- 2026-11-06: SEBI discovery parses only the first listing page from saved HTML,
+  using table sample_1. Pagination is deliberately omitted: its request contract
+  has not been verified and following it would exceed the approved request scope.
+  This adapter does not claim complete historical coverage or enable live crawling.
+- 2026-11-06: SEBI date-only labels are interpreted as midnight in India and
+  converted to UTC; they are approximate publication times. Invalid and duplicate
+  rows increment the adapter's most-recent-call skipped_rows diagnostic; a missing
+  listing table fails explicitly. The existing adapter interface stays unchanged.
+- 2026-11-06: Commit only five SEBI listing metadata rows; full captures stay in
+  gitignored local_only and are excluded from Docker build contexts. CI runs the
+  deterministic suite with local services, never against regulator sites.
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.
@@ -182,7 +194,7 @@ deduplication, and naive changes. Parsing/normalization and meaningful diffs
 remain unimplemented; run metadata reflects raw-byte processing only.
 The four read HTTP endpoints are implemented. No lease scheduler or notifications exist yet. RBI discovery
 is tested against synthetic RSS only; compatibility with the live feed remains
-unverified. No live RBI requests have been made. Tests inject MockTransport and fake clocks;
+unverified. RBI robots returned HTTP 418; RBI remains fixtures-only. Tests inject MockTransport and fake clocks;
 the new network tests also run with Docker networking disabled. HTTP destinations
 are validated and policy-checked; source enablement and site-terms review remain
 manual prerequisites for a future live crawl.
