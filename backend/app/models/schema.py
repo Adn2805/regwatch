@@ -58,6 +58,10 @@ class Document(Base):
     title: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    etag: Mapped[str | None] = mapped_column(Text)
+    last_modified: Mapped[str | None] = mapped_column(Text)
+    validator_url: Mapped[str | None] = mapped_column(Text)
+
 
 class DocumentVersion(Base):
     __tablename__ = "document_versions"

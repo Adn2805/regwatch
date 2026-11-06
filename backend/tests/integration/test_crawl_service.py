@@ -60,10 +60,14 @@ class Regulator:
     robots_status: int = 200
     pause_after_first: bool = False
     requests: list[str] = field(default_factory=list)
+    response_headers: dict[str, str] = field(default_factory=dict)
+    captured: list[httpx.Request] = field(default_factory=list)
+    not_modified: bool = False
 
     def respond(self, request: httpx.Request) -> httpx.Response:
         assert request.url.host == "www.rbi.org.in", "Unexpected mock destination"
         self.requests.append(str(request.url))
+        self.captured.append(request)
         if request.url.path == "/robots.txt":
             return httpx.Response(
                 self.robots_status, stream=httpx.ByteStream(b"User-agent: *\nAllow: /")
@@ -77,9 +81,9 @@ class Regulator:
         if self.pause_after_first and identity == "10001":
             self.robots_status = 503
         return httpx.Response(
-            200,
-            stream=httpx.ByteStream(self.bodies[identity]),
-            headers={"content-type": "application/pdf"},
+            304 if self.not_modified else 200,
+            stream=httpx.ByteStream(b"" if self.not_modified else self.bodies[identity]),
+            headers={"content-type": "application/pdf", **self.response_headers},
         )
 
 
@@ -439,3 +443,175 @@ async def test_robots_4xx_persists_paused_source_and_exact_reason(
         assert source is not None and source.status == "paused"
     assert env.regulator.requests == ["https://www.rbi.org.in/robots.txt"]
     assert env.totals() == (0, 0, 0)
+
+
+WEAK_ETAG = 'W/"preserve-this-value"'
+LAST_MODIFIED = "Thu, 05 Nov 2026 00:00:00 GMT"
+
+
+def document_validators(env: CrawlEnvironment) -> tuple[str | None, str | None, str | None]:
+    with env.sessions() as session:
+        document = session.scalar(select(Document).where(Document.source_id == env.source_id))
+        assert document is not None
+        return document.etag, document.last_modified, document.validator_url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_sql", ["INSERT INTO document_versions", "UPDATE documents SET etag"]
+)
+async def test_validator_state_rolls_back_with_version_failure(
+    env: CrawlEnvironment, failure_sql: str
+) -> None:
+    env.regulator.response_headers = {"etag": WEAK_ETAG, "last-modified": LAST_MODIFIED}
+    await env.service.run(env.source_id, max_documents=1)
+    old = document_validators(env)
+    env.regulator.bodies["10001"] = b"changed but transaction must fail"
+    env.regulator.response_headers = {"etag": '"new-value"'}
+    with env.sessions() as session:
+        engine = session.get_bind()
+
+    def reject(
+        connection: Connection,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: bool,
+    ) -> None:
+        if statement.startswith(failure_sql):
+            raise RuntimeError("Injected validator transaction failure")
+
+    event.listen(engine, "before_cursor_execute", reject)
+    try:
+        summary = await env.service.run(env.source_id, max_documents=1)
+    finally:
+        event.remove(engine, "before_cursor_execute", reject)
+    assert summary.status == "failed"
+    assert document_validators(env) == old
+    assert env.totals() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_304_success_keeps_one_version_and_preserves_weak_etag(env: CrawlEnvironment) -> None:
+    env.regulator.response_headers = {"etag": WEAK_ETAG, "last-modified": LAST_MODIFIED}
+    first = await env.service.run(env.source_id, max_documents=1)
+    assert first.status == "succeeded"
+    stored = document_validators(env)
+    assert stored == (
+        WEAK_ETAG,
+        LAST_MODIFIED,
+        next(r for r in env.regulator.requests if "Id=10001" in r),
+    )
+    env.regulator.not_modified = True
+    second = await env.service.run(env.source_id, max_documents=1)
+    assert second.status == "succeeded"
+    assert_counts(second, discovered=2, fetched=1, unchanged=1)
+    assert env.totals() == (1, 1, 0)
+    assert env.s3.list_objects_v2(Bucket=env.bucket)["KeyCount"] == 1
+    assert document_validators(env) == stored
+    request = env.regulator.captured[-1]
+    assert request.headers["if-none-match"] == WEAK_ETAG
+    assert request.headers["if-modified-since"] == LAST_MODIFIED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_304", [False, True])
+async def test_absent_response_validators_clear_all_columns(
+    env: CrawlEnvironment, status_304: bool
+) -> None:
+    env.regulator.response_headers = {"etag": WEAK_ETAG, "last-modified": LAST_MODIFIED}
+    await env.service.run(env.source_id, max_documents=1)
+    env.regulator.response_headers.clear()
+    env.regulator.not_modified = status_304
+    summary = await env.service.run(env.source_id, max_documents=1)
+    assert summary.status == "succeeded"
+    assert document_validators(env) == (None, None, None)
+    assert env.totals() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_200_changed_content_is_processed_even_with_repeated_validator(
+    env: CrawlEnvironment,
+) -> None:
+    env.regulator.response_headers = {"etag": WEAK_ETAG}
+    await env.service.run(env.source_id, max_documents=1)
+    env.regulator.bodies["10001"] = b"server changed bytes but reused its weak validator"
+    summary = await env.service.run(env.source_id, max_documents=1)
+    assert summary.status == "succeeded"
+    assert_counts(summary, discovered=2, fetched=1, new_versions=1)
+    assert env.totals() == (1, 2, 1)
+    assert env.regulator.captured[-1].headers["if-none-match"] == WEAK_ETAG
+
+
+@pytest.mark.asyncio
+async def test_304_without_an_existing_version_fails(env: CrawlEnvironment) -> None:
+    env.regulator.not_modified = True
+    summary = await env.service.run(env.source_id, max_documents=1)
+    assert summary.status == "failed" and summary.counts.failed == 1
+    assert env.totals() == (1, 0, 0)
+    assert document_validators(env) == (None, None, None)
+    assert env.s3.list_objects_v2(Bucket=env.bucket)["KeyCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_late_304_cannot_overwrite_newer_validator_state(
+    env: CrawlEnvironment,
+) -> None:
+    env.regulator.response_headers = {"etag": WEAK_ETAG}
+    await env.service.run(env.source_id, max_documents=1)
+    arrived = asyncio.Event()
+    release = asyncio.Event()
+    first = True
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal first
+        if request.url.path.endswith("NotificationUser.aspx"):
+            if first:
+                first = False
+                arrived.set()
+                await release.wait()
+                return httpx.Response(304, headers={"etag": WEAK_ETAG})
+            return httpx.Response(
+                200, headers={"etag": '"newer"'}, stream=httpx.ByteStream(b"newer body")
+            )
+        return env.regulator.respond(request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False) as client:
+        service = CrawlService(env.sessions, fetcher(client), env.store)
+        late = asyncio.create_task(service.run(env.source_id, max_documents=1))
+        try:
+            await asyncio.wait_for(arrived.wait(), 5)
+            newer = await CrawlService(env.sessions, fetcher(client), env.store).run(
+                env.source_id, max_documents=1
+            )
+            assert newer.status == "succeeded"
+        finally:
+            release.set()
+        old = await asyncio.wait_for(late, 5)
+    assert old.status == "failed"
+    assert any("Document changed during conditional request" in error for error in old.errors)
+    assert document_validators(env)[0] == '"newer"'
+    assert env.totals() == (1, 2, 1)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_failure_keeps_previous_validators(
+    env: CrawlEnvironment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core.s3 import SnapshotStorageError
+
+    env.regulator.response_headers = {"etag": WEAK_ETAG, "last-modified": LAST_MODIFIED}
+    await env.service.run(env.source_id, max_documents=1)
+    before = document_validators(env)
+    env.regulator.response_headers = {"etag": '"new-value"'}
+    env.regulator.bodies["10001"] = b"new body cannot be stored"
+
+    def fail(content: bytes, *, content_type: str = "application/octet-stream") -> Snapshot:
+        raise SnapshotStorageError("Injected storage failure")
+
+    monkeypatch.setattr(env.store, "put", fail)
+    summary = await env.service.run(env.source_id, max_documents=1)
+    assert summary.status == "failed"
+    assert document_validators(env) == before
+    assert env.totals() == (1, 1, 0)

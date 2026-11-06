@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import update, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.crawl.adapters.base import Publication
-from app.models.schema import CrawlRun, Document, Source
+from app.models.schema import CrawlRun, Document, Source, DocumentVersion
+from app.crawl.conditional import DocumentRequestState, Validators
+from app.crawl.fetcher import FetchResult
+from app.crawl.errors import FetchError
 
 
 @dataclass
@@ -39,6 +42,24 @@ class RunContext:
     listing_url: str
     adapter: str
     source_status: str
+
+
+def apply_validators(document: Document, validators: Validators) -> None:
+    document.etag = validators.etag
+    document.last_modified = validators.last_modified
+    document.validator_url = validators.url
+
+
+def request_state(session: Session, document: Document) -> DocumentRequestState:
+    version_id = session.scalar(
+        select(DocumentVersion.id)
+        .where(DocumentVersion.document_id == document.id)
+        .order_by(DocumentVersion.fetched_at.desc(), DocumentVersion.id.desc())
+        .limit(1)
+    )
+    return DocumentRequestState(
+        Validators(document.validator_url, document.etag, document.last_modified), version_id
+    )
 
 
 class CrawlRepository:
@@ -73,6 +94,35 @@ class CrawlRepository:
             if document_id is None:
                 raise RuntimeError("Document upsert did not return an identity")
             return document_id
+
+    def document_request_state(self, document_id: UUID) -> DocumentRequestState:
+        with self._sessions.begin() as session:
+            # Read validators and the version baseline under one short document lock.
+            document = session.scalar(
+                select(Document).where(Document.id == document_id).with_for_update()
+            )
+            if document is None:
+                raise ValueError("Unknown document")
+            return request_state(session, document)
+
+    def record_not_modified(
+        self, document_id: UUID, response: FetchResult, expected: DocumentRequestState
+    ) -> None:
+        with self._sessions.begin() as session:
+            document = session.scalar(
+                select(Document).where(Document.id == document_id).with_for_update()
+            )
+            if (
+                document is None
+                or expected.version_id is None
+                or not expected.validators.headers_for(response.url)
+            ):
+                raise FetchError("Cannot accept HTTP 304 without a matching stored version")
+            if request_state(session, document) != expected:
+                raise FetchError(
+                    "Document changed during conditional request; validators not updated"
+                )
+            apply_validators(document, Validators.from_response(response.url, response.headers))
 
     def checkpoint(self, run_id: UUID, counts: RunCounts) -> None:
         with self._sessions.begin() as session:

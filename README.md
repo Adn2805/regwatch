@@ -583,3 +583,17 @@ Run `tests/integration/test_shared_robots.py` and
 
 A required request/Crawl-delay forces effective token capacity one, even if
 `RATE_CAPACITY` is larger; burst configuration cannot relax politeness.
+
+Phase 2 B4 adds URL-scoped ETag/Last-Modified per document. Successful 304 responses
+count fetched/unchanged and create no snapshot or version. Missing response
+validators clear stored metadata, and 200 bodies are processed even when a server
+repeats its validator. A delayed 304 cannot overwrite newer document state.
+`0003_document_validators` only adds three nullable columns; no backfill occurs.
+Migration downgrade tests use a separate disposable database, never local data.
+Run `tests/unit/test_conditional_fetch.py`, `tests/integration/test_crawl_service.py`
+and `tests/integration/test_validator_migration.py` in Docker for verification.
+
+For the repeated concurrency/crash gate, mount `scripts/` at `/scripts` in the test
+container and run `python /scripts/repeat_tests.py` with the pytest paths and `-k`
+selection. It uses 20 fresh pytest processes, rejects skips, stops on the first
+failure, and never retries a failing round or adds inter-round sleeps.

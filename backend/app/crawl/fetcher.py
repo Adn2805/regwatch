@@ -15,6 +15,7 @@ import httpx
 from app.core.config import FetchSettings
 from app.crawl.adapters.base import AdapterParseError, canonicalize_url
 from app.crawl.errors import FetchError, ResponseTooLarge, RobotsDisallowed
+from app.crawl.conditional import Validators
 from app.crawl.robots import RobotsCache, RobotsPolicy, PolicyCache
 from app.crawl.concurrency import RedisRequestGate
 
@@ -83,8 +84,14 @@ class Fetcher:
         for name in ("httpx", "httpcore", "protego"):
             logging.getLogger(name).setLevel(logging.WARNING)
 
-    async def fetch(self, url: str) -> FetchResult:
-        result = await self._follow_redirects(_url(url, url), check_robots=True)
+    async def fetch(self, url: str, *, validators: Validators | None = None) -> FetchResult:
+        result = await self._follow_redirects(
+            _url(url, url), check_robots=True, validators=validators
+        )
+        if result.http_status == 304:
+            if validators is None or not validators.headers_for(result.url):
+                raise FetchError("Unexpected HTTP 304 without matching conditional validators")
+            return result
         if not 200 <= result.http_status < 300:
             raise FetchError(f"HTTP request failed with status {result.http_status}")
         return result
@@ -99,13 +106,15 @@ class Fetcher:
         result = await self._follow_redirects(url, check_robots=False)
         return result.http_status, result.content
 
-    async def _follow_redirects(self, url: str, *, check_robots: bool) -> FetchResult:
+    async def _follow_redirects(
+        self, url: str, *, check_robots: bool, validators: Validators | None = None
+    ) -> FetchResult:
         visited: set[str] = set()
         for hop in range(self._settings.crawl_max_redirects + 1):
             if url in visited:
                 raise FetchError("Redirect loop detected")
             visited.add(url)
-            result = await self._request(url, check_robots=check_robots)
+            result = await self._request(url, check_robots=check_robots, validators=validators)
             if result.http_status not in REDIRECT_STATUSES:
                 return result
             if hop == self._settings.crawl_max_redirects:
@@ -116,7 +125,9 @@ class Fetcher:
             url = _url(location, url)
         raise AssertionError("Redirect loop must return or raise")
 
-    async def _request(self, url: str, *, check_robots: bool) -> FetchResult:
+    async def _request(
+        self, url: str, *, check_robots: bool, validators: Validators | None = None
+    ) -> FetchResult:
         for attempt in range(self._settings.crawl_max_retries + 1):
             if check_robots:
                 policy = await self.robots_policy(url)
@@ -129,7 +140,7 @@ class Fetcher:
             retry_after: str | None = None
             status_code: int | None = None
             try:
-                result = await self._once(url)
+                result = await self._once(url, validators=validators)
                 status_code = result.http_status
                 if result.http_status != 429 and not 500 <= result.http_status <= 599:
                     return result
@@ -147,7 +158,7 @@ class Fetcher:
             )
         raise AssertionError("Retry loop must return or raise")
 
-    async def _once(self, url: str) -> FetchResult:
+    async def _once(self, url: str, *, validators: Validators | None = None) -> FetchResult:
         host = urlsplit(url).hostname or ""
         async with self._locks.setdefault(host, asyncio.Lock()):
             delay = self._delays.get(host, self._settings.crawl_delay_s)
@@ -158,22 +169,24 @@ class Fetcher:
             try:
                 if self._coordination is not None:
                     async with self._coordination.slot(host, minimum_interval_s=delay):
-                        return await self._bounded_read(url)
-                return await self._bounded_read(url)
+                        return await self._bounded_read(url, validators=validators)
+                return await self._bounded_read(url, validators=validators)
             finally:
                 self._finished[host] = self._clock()
 
-    async def _bounded_read(self, url: str) -> FetchResult:
+    async def _bounded_read(self, url: str, *, validators: Validators | None = None) -> FetchResult:
         deadline = self._settings.crawl_total_timeout_s
         if self._coordination is not None:
             deadline = min(deadline, self._coordination.request_timeout_s)
         try:
             async with asyncio.timeout(deadline):
-                return await self._read_response(url)
+                return await self._read_response(url, validators=validators)
         except TimeoutError:
             raise httpx.ReadTimeout("HTTP attempt total deadline exceeded") from None
 
-    async def _read_response(self, url: str) -> FetchResult:
+    async def _read_response(
+        self, url: str, *, validators: Validators | None = None
+    ) -> FetchResult:
         async with self._client.stream(
             "GET",
             url,
@@ -182,6 +195,7 @@ class Fetcher:
             headers={
                 "User-Agent": self._settings.user_agent(),
                 "Accept-Encoding": "identity",
+                **(validators.headers_for(url) if validators is not None else {}),
             },
         ) as response:
             body = bytearray()

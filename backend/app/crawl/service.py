@@ -78,23 +78,35 @@ class CrawlService:
                         document_id = await asyncio.to_thread(
                             self._repository.upsert_document, source_id, publication
                         )
-                        response = await self._fetcher.fetch(publication.canonical_url)
+                        state = await asyncio.to_thread(
+                            self._repository.document_request_state, document_id
+                        )
+                        response = await self._fetcher.fetch(
+                            publication.canonical_url,
+                            validators=state.validators if state.version_id is not None else None,
+                        )
                         counts.fetched += 1
                         # Persist progress before upload, including the hard-crash window.
                         await asyncio.to_thread(self._repository.checkpoint, context.run_id, counts)
-                        record = await asyncio.to_thread(
-                            record_version,
-                            self._sessions,
-                            self._store,
-                            document_id,
-                            response,
-                            normalized_text="",
-                            sections=[],
-                        )
-                        if record.created:
-                            counts.new_versions += 1
-                        else:
+                        if response.http_status == 304:
+                            await asyncio.to_thread(
+                                self._repository.record_not_modified, document_id, response, state
+                            )
                             counts.unchanged += 1
+                        else:
+                            record = await asyncio.to_thread(
+                                record_version,
+                                self._sessions,
+                                self._store,
+                                document_id,
+                                response,
+                                normalized_text="",
+                                sections=[],
+                            )
+                            if record.created:
+                                counts.new_versions += 1
+                            else:
+                                counts.unchanged += 1
                     except SourcePaused as error:
                         errors.append(safe_error(error))
                         counts.paused += 1

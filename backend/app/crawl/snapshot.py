@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.s3 import SnapshotStore
 from app.crawl.fetcher import FetchResult
 from app.models.schema import Change, Document, DocumentVersion
+from app.crawl.repository import apply_validators
+from app.crawl.conditional import Validators
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,9 @@ def record_version(
     # If DB commit fails, a safe, unreferenced object may remain in MinIO.
     with sessions.begin() as session:
         # Serialize the previous-version decision for this document, not all crawls.
-        session.execute(select(Document.id).where(Document.id == document_id).with_for_update())
+        document = session.scalar(
+            select(Document).where(Document.id == document_id).with_for_update()
+        )
         previous = session.scalar(
             select(DocumentVersion)
             .where(DocumentVersion.document_id == document_id)
@@ -87,4 +91,7 @@ def record_version(
             session.add(change)
             session.flush()
             change_id = change.id
+        if document is None:
+            raise RuntimeError("Document disappeared during version persistence")
+        apply_validators(document, Validators.from_response(response.url, response.headers))
         return VersionRecord(version_id, created, change_id)

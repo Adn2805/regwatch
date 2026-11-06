@@ -227,6 +227,15 @@ flowchart LR
   delays force effective bucket capacity one, even with a larger configured
   capacity, so Crawl-delay cannot be defeated by bursts. Tests inject random values.
 
+- 2026-11-06: Step B4 adds only nullable document validator columns, without
+  defaults or backfill. Validators are opaque, URL-scoped and committed atomically
+  with version/change state after successful snapshot storage. Every 200 body is
+  processed regardless of its validator. A 304 requires an existing baseline and
+  unchanged request state under the document lock; stale 304 responses fail rather
+  than overwrite newer metadata. Missing validators clear all three columns,
+  including on 304. Upgrade/downgrade/upgrade is tested only in a new disposable
+  database containing fixture rows; the real database is never downgraded.
+
 ## Live verification
 
 On 2026-11-06, RBI returned HTTP 418 for robots.txt; it remains paused and
@@ -237,6 +246,17 @@ reported two unchanged documents. No fetched content was committed.
 
 Run IDs: `fcb5a0a6-65ae-431a-bb5e-3252627b4e43` (first) and
 `5fdb5410-01ad-4606-b5f0-1af89520e4c5` (repeat).
+
+## Batch B, Step 4 design (schema approved)
+
+1. Store nullable etag, last_modified and validator_url on documents, scoped to the fetched URL.
+2. An additive migration adds only these columns; no backfill or historical-content rewrite.
+3. Send validators only to their recorded URL; never forward them blindly through redirects.
+4. A 304 requires an existing stored version, counts unchanged/successful, and creates no snapshot/version.
+5. A 200 body is always hashed and processed, even when its validator repeats an earlier value.
+6. Persist validators atomically with the version; failures retain state, and missing response validators clear it.
+7. Write failure tests first, using mocked HTTP and real PostgreSQL/MinIO; no regulator requests.
+8. Run Docker lint, strict types, the full suite, and 20x applicable concurrency/crash checks before commit/CI.
 
 ## Current limits
 

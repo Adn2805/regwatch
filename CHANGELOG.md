@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add document-scoped conditional GET with atomic validator persistence, safe 304
+  handling, and an approved additive/reversible migration (Phase 2 B4).
+
 - Share positive/paused robots records with renewable, owner-checked refresh locks;
   add full-jitter retry backoff and deterministic failure tests (Phase 2 A3).
 

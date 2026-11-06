@@ -20,6 +20,7 @@ from app.crawl.robots_shared import RedisRobotsCache
 from app.core.db import make_engine
 from app.core.s3 import SnapshotStore, make_s3_client
 from app.crawl.fetcher import Fetcher, FetchResult
+from app.crawl.conditional import Validators
 from app.crawl.errors import FetchError
 from app.crawl.service import CrawlService, safe_error
 from app.models.schema import Source
@@ -79,8 +80,8 @@ class RecordingFetcher(Fetcher):
         super().__init__(client, settings, coordination=coordination, robots_cache=robots_cache)
         self.feed: bytes | None = None
 
-    async def fetch(self, url: str) -> FetchResult:
-        response = await super().fetch(url)
+    async def fetch(self, url: str, *, validators: Validators | None = None) -> FetchResult:
+        response = await super().fetch(url, validators=validators)
         if url == FEED_URL:
             self.feed = response.content
         return response
