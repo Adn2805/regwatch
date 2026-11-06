@@ -3,7 +3,7 @@
 A deterministic regulatory change monitor, built in gated steps. Currently:
 Phase 1: infrastructure, schema, fixture-based RBI discovery, and a tested
 fetcher with robots handling, snapshot storage, and a crawl service with naive
-change detection and durable run counts. RBI is the
+change detection, durable run counts, and four read endpoints. RBI is the
 first intended source; live crawling is disabled pending robots policy review.
 
 ## Start
@@ -46,7 +46,7 @@ To check migration reversibility on an empty development database only:
 
 No crawl, performance, or AI evaluation results have been measured.
 Phase 1's complete gate remains pending. Discovery uses synthetic fixtures;
-parsing, scheduled worker integration, read endpoints, and CI remain unfinished.
+parsing, scheduled worker integration, CI, and live RBI verification remain unfinished.
 
 Step 1 verification on 2026-11-05 (Docker Desktop, Linux containers):
 
@@ -167,8 +167,8 @@ is rejected, and oversize streams close without buffering the remaining body.
 The layer emits no payload/request logs; contact settings are masked in repr,
 and request URLs/headers are excluded from error messages.
 
-Live crawling remains disabled. Parsing, scheduled workers, APIs, and CI are
-still required before the complete Phase 1 gate can pass.
+Live crawling remains disabled. Parsing, scheduled workers, CI, and live-source
+verification remain before the complete Phase 1 gate can pass.
 
 
 Step 3 verification on 2026-11-06, using the final Docker image:
@@ -348,3 +348,94 @@ All nine crawl scenarios passed, including the hard-exit retry and atomic
 version/change rollback. The 153 warnings come from the SDK UTC deprecation
 already observed in Step 4 and remain visible. No live regulator HTTP requests
 were made. These are functional checks, not throughput/load benchmarks.
+
+
+## Step 6: read API
+
+Start with `docker compose up --build` from `D:\Project\regwatch`.
+The API waits for migrations and binds only to localhost. Open
+[Swagger UI](http://127.0.0.1:8000/docs) or
+[the OpenAPI specification](http://127.0.0.1:8000/openapi.json).
+No source is activated and no crawl is triggered by API startup or requests.
+
+All four endpoints return `{items, total, limit, offset}`. Defaults are
+`limit=50` and `offset=0`; accepted bounds are limit 1..100 and offset 0..100000.
+An offset at or beyond the result count returns an empty items list. Total is
+the number of matching rows before pagination.
+
+| Endpoint | Filters | Order |
+| --- | --- | --- |
+| `GET /sources` | None | name, UUID ascending |
+| `GET /documents` | `source_id` | created_at, UUID descending |
+| `GET /documents/{document_id}/versions` | Required document path ID | fetched_at, UUID descending |
+| `GET /changes` | `document_id`, `date_from`, `date_to` | created_at, UUID descending |
+
+Date filters use the change's created_at and accept timezone-aware timestamps,
+e.g. `2026-11-06T00:00:00Z` or `2026-11-06T05:30:00+05:30`. Both bounds are
+inclusive; date_from may equal date_to. Naive timestamps or reversed bounds
+return 422. Encode `+` as `%2B` when writing an offset timestamp directly in a URL.
+UUID tie-breakers provide stable ordering for equal timestamps, but concurrent
+inserts can still shift offset pages; this API does not promise a snapshot.
+
+Unknown document path IDs, unknown source_id filters, and unknown document_id
+filters return 404. A known entity with no matching children returns 200 and an
+empty page. Invalid UUIDs, pagination, dates, date ranges, and unknown query
+parameters return 422. Database failures return a sanitized 503; there are no
+automatic query retries in this API layer.
+
+Version responses include ID, document ID, snapshot_key, content_hash, fetched_at,
+HTTP status, and parser yield. They never include raw snapshot bytes, extracted
+text, sections, or search vectors; the query excludes those content columns.
+The read API has no object-download endpoint and does not connect to MinIO.
+Source responses exclude validators and configuration credentials.
+
+Examples:
+
+```powershell
+Invoke-RestMethod -NoProxy 'http://127.0.0.1:8000/sources?limit=10&offset=0'
+Invoke-RestMethod -NoProxy 'http://127.0.0.1:8000/changes?date_from=2026-11-06T00:00:00Z'
+```
+
+Verification with the existing services running:
+
+```powershell
+docker compose build migrate api
+docker compose run --rm --no-deps migrate pytest tests/integration/test_api.py -q
+docker compose run --rm --no-deps migrate pytest -q
+docker run --rm --network none --entrypoint ruff regwatch-migrate check .
+docker run --rm --network none --entrypoint mypy regwatch-migrate app migrations tests
+```
+
+API tests use real PostgreSQL in unique `api_test_*` schemas, seed committed
+fixture data, and drop only their own schema afterward. They cover empty pages,
+pagination/max bounds and timestamp ties, filters and inclusive timezone-aware
+dates, 404/422, fixed 503 errors, response metadata allowlists, read-only HTTP
+methods, docs HTML, and the OpenAPI specification. Other integration tests
+continue to use only local PostgreSQL/MinIO and mocked regulator HTTP.
+
+The stuck-running audit decision is recorded in ARCHITECTURE.md: Phase 2 will
+add lease expiry and recovery/reconciliation. No recovery implementation or
+live RBI request was added in Step 6. The live robots/feed check and a small
+real crawl remain a separate task before the complete Phase 1 gate, which also
+still requires CI and any other outstanding checklist items.
+
+
+Step 6 verification on 2026-11-06:
+
+```text
+API integration tests: 35 passed, 1 warning in 4.12s
+Schema check: No new upgrade operations detected.
+Offline unit suite: 135 passed in 1.04s
+Full final-image suite: 191 passed, 154 warnings in 9.25s
+Ruff: All checks passed!
+Formatting: 62 files already formatted
+Strict mypy: Success: no issues found in 38 source files
+Running API smoke test: /docs 200, /openapi.json 200, /sources 200
+```
+
+The running-service probe used direct IPv4 loopback with PowerShell `-NoProxy`.
+An initial `localhost` probe did not reach the container; the direct probe
+succeeded without changing the application. The 154 warnings consist of the
+existing SDK UTC deprecation plus a Starlette/AnyIO compatibility deprecation;
+they remain visible. API tests and all existing tests passed. These are
+functional checks, not load benchmarks or a completed Phase 1 gate.

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add Step 6 read endpoints for sources, documents, document versions, and changes,
+  with Pydantic responses, bounded pagination, source/document/date filters,
+  and explicit 404/422 responses.
+- Add a localhost-only FastAPI/Uvicorn Compose service and real-PostgreSQL API
+  tests for query boundaries, filters, content exclusion, errors, and OpenAPI docs.
+- Record Phase 2 lease-based recovery for stuck running crawl audit records.
+- Verify 191 tests and a running API docs/OpenAPI/read smoke test; live RBI verification and the Phase 1 gate remain pending.
+
 - Add Phase 1 Step 5 crawl orchestration, source-scoped document upserts,
   version deduplication, and atomic first/subsequent-version naive changes.
 - Add migration 0002 for durable crawl counts and paused outcomes; isolate

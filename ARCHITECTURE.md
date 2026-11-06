@@ -138,13 +138,36 @@ flowchart LR
   process termination cannot execute finally; lease expiry/reconciliation is
   deliberately deferred to Phase 2 rather than claiming crash recovery here.
 
+- 2026-11-06: A hard-killed process can leave crawl_runs stuck in running; Phase 2 will add lease expiry and recovery/reconciliation rather than treating those records as completed.
+
+
+- 2026-11-06: Step 6 exposes only four GET business routes with explicit Pydantic
+  schemas. Thin routers delegate to a read repository, which owns SQL projections,
+  filters, existence checks, counts, and ordering. Version projections exclude
+  normalized_text, sections, and search vectors; no S3 client/body fetch is involved.
+- 2026-11-06: Use bounded offset pagination (limit 50 by default, max 100;
+  offset 0..100000) and return items/total/limit/offset. UUID tie-breakers make
+  equal-timestamp ordering deterministic. Cursor pagination was rejected for
+  this MVP's small read API; offset pages are not a snapshot under concurrent writes.
+- 2026-11-06: Filter documents by source_id and changes by document_id plus
+  inclusive timezone-aware date_from/date_to bounds. Unknown referenced entities
+  return 404; malformed IDs, invalid bounds/ranges, and extra parameters return 422.
+- 2026-11-06: Create/close the API engine through application lifespan. Each
+  repository method owns a short-lived session; synchronous endpoints run off
+  the event loop. Bound connect, pool, statement, and lock waits. Database failures
+  return a fixed 503; this read layer does not automatically retry queries.
+- 2026-11-06: Bind the Compose API to localhost:8000 and wait for successful
+  migrations. The API never starts crawls or activates sources. Test the read API
+  against real PostgreSQL in unique schemas so empty-result tests do not delete
+  or depend on user data. No migration is needed for these read endpoints.
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.
 The crawl service orchestrates discovery, fetch, immutable storage, version
 deduplication, and naive changes. Parsing/normalization and meaningful diffs
 remain unimplemented; run metadata reflects raw-byte processing only.
-No lease scheduler, HTTP API, or notifications exist yet. RBI discovery
+The four read HTTP endpoints are implemented. No lease scheduler or notifications exist yet. RBI discovery
 is tested against synthetic RSS only; compatibility with the live feed remains
 unverified. No live RBI requests have been made. Tests inject MockTransport and fake clocks;
 the new network tests also run with Docker networking disabled. HTTP destinations
