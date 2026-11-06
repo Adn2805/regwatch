@@ -597,3 +597,14 @@ For the repeated concurrency/crash gate, mount `scripts/` at `/scripts` in the t
 container and run `python /scripts/repeat_tests.py` with the pytest paths and `-k`
 selection. It uses 20 fresh pytest processes, rejects skips, stops on the first
 failure, and never retries a failing round or adds inter-round sleeps.
+
+Phase 2 B5 adds nullable source/run lease tokens, expiry and heartbeat metadata.
+PostgreSQL `now()` controls ownership and expiry. Claims use `FOR UPDATE SKIP LOCKED`;
+worker transactions fence source ownership before document/run writes. Completion
+clears ownership and advances `next_crawl_at` atomically with run completion.
+Expired leased runs become `failed` with a fixed recovery reason; historical
+unleased `running` records remain untouched. No status constraint was changed.
+The additive migration has a downgrade tested with populated disposable databases.
+A validated private `pg_dump` backup preceded the local upgrade. The concurrency/
+crash gate passed 20/20 rounds across 16 cases, including separate claim processes
+and independent connections; no retry rounds or inter-round sleeps were added.

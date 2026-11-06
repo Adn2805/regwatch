@@ -105,3 +105,14 @@ class RedisSettings(BaseSettings):
     coordination_wait_s: float = Field(default=120, gt=0, le=3600, allow_inf_nan=False)
 
     robots_refresh_lease_s: float = Field(default=30, ge=0.05, le=300, allow_inf_nan=False)
+
+
+class LeaseSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        case_sensitive=False, extra="ignore", hide_input_in_errors=True
+    )
+    lease_duration_s: float = Field(default=60, gt=0, le=3600, allow_inf_nan=False)
+
+    @property
+    def heartbeat_interval_s(self) -> float:
+        return self.lease_duration_s / 3

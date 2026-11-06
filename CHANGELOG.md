@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add Postgres due-source leases, fenced worker writes, heartbeat and token-scoped
+  recovery with an approved additive migration and private pre-migration backup (B5).
+
 - Add document-scoped conditional GET with atomic validator persistence, safe 304
   handling, and an approved additive/reversible migration (Phase 2 B4).
 

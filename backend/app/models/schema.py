@@ -48,6 +48,10 @@ class Source(Base):
     consecutive_failures: Mapped[int] = mapped_column(Integer, server_default="0")
     status: Mapped[str] = mapped_column(String(20), server_default="paused")
 
+    lease_token: Mapped[UUID | None] = mapped_column()
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    lease_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class Document(Base):
     __tablename__ = "documents"
@@ -141,3 +145,5 @@ class CrawlRun(Base):
     unchanged: Mapped[int] = mapped_column(Integer, server_default="0")
     failed: Mapped[int] = mapped_column(Integer, server_default="0")
     paused: Mapped[int] = mapped_column(Integer, server_default="0")
+
+    lease_token: Mapped[UUID | None] = mapped_column()

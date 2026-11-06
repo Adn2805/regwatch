@@ -16,6 +16,7 @@ from app.crawl.errors import FetchError, RobotsDisallowed, SourcePaused
 from app.crawl.fetcher import Fetcher
 from app.crawl.repository import CrawlRepository, RunCounts
 from app.crawl.snapshot import record_version
+from app.schedule.leases import LeaseClaim, LeaseLost
 
 
 @dataclass(frozen=True)
@@ -35,10 +36,12 @@ class CrawlService:
         store: SnapshotStore,
         *,
         adapters: Mapping[str, SourceAdapter] | None = None,
+        claim: LeaseClaim | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._sessions, self._fetcher, self._store = sessions, fetcher, store
-        self._repository = CrawlRepository(sessions)
+        self._claim = claim
+        self._repository = CrawlRepository(sessions, claim=claim)
         self._adapters = (
             adapters if adapters is not None else {"rbi": RbiAdapter(), "sebi": SebiAdapter()}
         )
@@ -102,11 +105,14 @@ class CrawlService:
                                 response,
                                 normalized_text="",
                                 sections=[],
+                                claim=self._claim,
                             )
                             if record.created:
                                 counts.new_versions += 1
                             else:
                                 counts.unchanged += 1
+                    except LeaseLost:
+                        raise
                     except SourcePaused as error:
                         errors.append(safe_error(error))
                         counts.paused += 1
@@ -125,6 +131,8 @@ class CrawlService:
                     await asyncio.to_thread(self._repository.checkpoint, context.run_id, counts)
                 else:
                     status = "failed" if counts.failed else "succeeded"
+        except LeaseLost:
+            raise
         except SourcePaused as error:
             errors.append(safe_error(error))
             counts.paused += 1

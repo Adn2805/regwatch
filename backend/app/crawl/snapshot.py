@@ -13,6 +13,7 @@ from app.crawl.fetcher import FetchResult
 from app.models.schema import Change, Document, DocumentVersion
 from app.crawl.repository import apply_validators
 from app.crawl.conditional import Validators
+from app.schedule.leases import LeaseClaim, LeaseLost, fence
 
 
 @dataclass(frozen=True)
@@ -30,8 +31,12 @@ def record_version(
     *,
     normalized_text: str,
     sections: list[dict[str, Any]],
+    claim: LeaseClaim | None = None,
 ) -> VersionRecord:
     """Caller supplies extracted text/sections; this step does not implement a parser."""
+    if claim is not None:
+        with sessions.begin() as session:
+            fence(session, claim)  # Reject already-stale owners before any object write.
     snapshot = store.put(
         response.content,
         content_type=response.headers.get("content-type", "application/octet-stream"),
@@ -39,10 +44,14 @@ def record_version(
     # Storage failures cannot leave even an uncommitted version in this session.
     # If DB commit fails, a safe, unreferenced object may remain in MinIO.
     with sessions.begin() as session:
+        if claim is not None:
+            fence(session, claim)
         # Serialize the previous-version decision for this document, not all crawls.
         document = session.scalar(
             select(Document).where(Document.id == document_id).with_for_update()
         )
+        if claim is not None and document is not None and document.source_id != claim.source_id:
+            raise LeaseLost("Lease does not own this document")
         previous = session.scalar(
             select(DocumentVersion)
             .where(DocumentVersion.document_id == document_id)

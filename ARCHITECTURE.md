@@ -236,6 +236,18 @@ flowchart LR
   including on 304. Upgrade/downgrade/upgrade is tested only in a new disposable
   database containing fixture rows; the real database is never downgraded.
 
+- 2026-11-06: B5 uses PostgreSQL now() for lease creation, comparison, heartbeat,
+  recovery and completion. UUID ownership is fenced under the source row lock
+  before worker DB writes; document locking follows source locking. Uploads get
+  a preliminary fence plus a second transactional fence: expiry during S3 upload
+  can leave only a safe immutable orphan, never a committed stale version.
+- 2026-11-06: B5 preserves the existing status constraint. Expired leased runs
+  become failed with reason "Lease expired; abandoned crawl recovered", retaining
+  checkpoint counts. Historical unleased running rows are never inferred expired
+  or automatically cleaned. Successful completion atomically finishes the run,
+  clears ownership and advances next_crawl_at. SQL transactions stay short;
+  PostgreSQL now() is transaction-start time, not a worker wall clock.
+
 ## Live verification
 
 On 2026-11-06, RBI returned HTTP 418 for robots.txt; it remains paused and
@@ -257,6 +269,17 @@ Run IDs: `fcb5a0a6-65ae-431a-bb5e-3252627b4e43` (first) and
 6. Persist validators atomically with the version; failures retain state, and missing response validators clear it.
 7. Write failure tests first, using mocked HTTP and real PostgreSQL/MinIO; no regulator requests.
 8. Run Docker lint, strict types, the full suite, and 20x applicable concurrency/crash checks before commit/CI.
+
+## Batch B, Step 5 design (schema approved)
+
+1. Add nullable lease_token UUID, lease_expires_at and lease_heartbeat_at timestamptz to sources.
+2. Add nullable lease_token UUID to crawl_runs and an index on sources.lease_expires_at; no backfill.
+3. Claim active due sources using FOR UPDATE SKIP LOCKED and PostgreSQL time in a short transaction.
+4. A new UUID token identifies each ownership period; heartbeat cannot renew an expired/replaced lease.
+5. Fence worker writes by locking/checking source ownership before document/run writes in the same transaction.
+6. Reclaiming an expired token finalizes only its leased running runs as failed, preserving checkpoint counts.
+7. Historical unleased running runs stay untouched; no inferred expiry or retrospective data updates.
+8. Test stale writers, heartbeat/expiry and simultaneous claimers first; use real PostgreSQL and 20x gates.
 
 ## Current limits
 

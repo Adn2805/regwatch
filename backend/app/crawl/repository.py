@@ -1,10 +1,9 @@
 """Short-lived database transactions for crawl audit and document identity."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import update, select
+from sqlalchemy import update, select, func, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -13,6 +12,7 @@ from app.models.schema import CrawlRun, Document, Source, DocumentVersion
 from app.crawl.conditional import DocumentRequestState, Validators
 from app.crawl.fetcher import FetchResult
 from app.crawl.errors import FetchError
+from app.schedule.leases import LeaseClaim, LeaseLost, fence
 
 
 @dataclass
@@ -63,14 +63,42 @@ def request_state(session: Session, document: Document) -> DocumentRequestState:
 
 
 class CrawlRepository:
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
-        self._sessions = sessions
+    def __init__(self, sessions: sessionmaker[Session], *, claim: LeaseClaim | None = None) -> None:
+        self._sessions, self._claim = sessions, claim
+
+    def _guard(
+        self, session: Session, *, source_id: UUID | None = None, run_id: UUID | None = None
+    ) -> None:
+        if self._claim is not None:
+            fence(session, self._claim)
+            if source_id is not None and source_id != self._claim.source_id:
+                raise LeaseLost("Lease does not own this source")
+            if run_id is not None:
+                if (
+                    run_id != self._claim.run_id
+                    or session.scalar(
+                        select(CrawlRun.id).where(
+                            CrawlRun.id == run_id,
+                            CrawlRun.lease_token == self._claim.token,
+                            CrawlRun.status == "running",
+                        )
+                    )
+                    is None
+                ):
+                    raise LeaseLost("Lease does not own this running crawl")
 
     def start(self, source_id: UUID) -> RunContext:
         with self._sessions.begin() as session:
+            self._guard(
+                session, source_id=source_id, run_id=self._claim.run_id if self._claim else None
+            )
             source = session.get(Source, source_id)
             if source is None:
                 raise ValueError("Unknown source")
+            if self._claim is not None:
+                return RunContext(
+                    self._claim.run_id, source_id, source.base_url, source.adapter, source.status
+                )
             run = CrawlRun(source_id=source_id)
             session.add(run)
             session.flush()
@@ -78,6 +106,7 @@ class CrawlRepository:
 
     def upsert_document(self, source_id: UUID, publication: Publication) -> UUID:
         with self._sessions.begin() as session:
+            self._guard(session, source_id=source_id)
             statement = (
                 insert(Document)
                 .values(
@@ -97,10 +126,17 @@ class CrawlRepository:
 
     def document_request_state(self, document_id: UUID) -> DocumentRequestState:
         with self._sessions.begin() as session:
+            self._guard(session)
             # Read validators and the version baseline under one short document lock.
             document = session.scalar(
                 select(Document).where(Document.id == document_id).with_for_update()
             )
+            if (
+                document is not None
+                and self._claim is not None
+                and document.source_id != self._claim.source_id
+            ):
+                raise LeaseLost("Lease does not own this document")
             if document is None:
                 raise ValueError("Unknown document")
             return request_state(session, document)
@@ -109,9 +145,16 @@ class CrawlRepository:
         self, document_id: UUID, response: FetchResult, expected: DocumentRequestState
     ) -> None:
         with self._sessions.begin() as session:
+            self._guard(session)
             document = session.scalar(
                 select(Document).where(Document.id == document_id).with_for_update()
             )
+            if (
+                document is not None
+                and self._claim is not None
+                and document.source_id != self._claim.source_id
+            ):
+                raise LeaseLost("Lease does not own this document")
             if (
                 document is None
                 or expected.version_id is None
@@ -126,6 +169,7 @@ class CrawlRepository:
 
     def checkpoint(self, run_id: UUID, counts: RunCounts) -> None:
         with self._sessions.begin() as session:
+            self._guard(session, run_id=run_id)
             session.execute(update(CrawlRun).where(CrawlRun.id == run_id).values(**counts.values()))
 
     def finish(
@@ -136,8 +180,9 @@ class CrawlRepository:
         reason: str | None,
         duration_ms: float,
     ) -> None:
-        finished = datetime.now(timezone.utc)
         with self._sessions.begin() as session:
+            self._guard(session, source_id=context.source_id, run_id=context.run_id)
+            finished = func.now()
             session.execute(
                 update(CrawlRun)
                 .where(CrawlRun.id == context.run_id)
@@ -149,6 +194,18 @@ class CrawlRepository:
                     duration_ms=max(0.0, duration_ms),
                 )
             )
+            if self._claim is not None:
+                session.execute(
+                    update(Source)
+                    .where(Source.id == context.source_id)
+                    .values(
+                        lease_token=None,
+                        lease_expires_at=None,
+                        lease_heartbeat_at=None,
+                        next_crawl_at=func.now()
+                        + Source.crawl_interval_s * text("interval '1 second'"),
+                    )
+                )
             source = update(Source).where(Source.id == context.source_id)
             if status == "paused":
                 session.execute(source.values(status="paused"))
