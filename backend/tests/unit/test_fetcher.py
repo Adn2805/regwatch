@@ -317,8 +317,10 @@ async def test_unexpected_compression_is_rejected(make_rig: RigFactory) -> None:
         else reply(200, b"not read", **{"Content-Encoding": "gzip"}),
         None,
     )
-    with pytest.raises(FetchError, match="content encoding"):
+    with pytest.raises(FetchError, match="content encoding") as captured:
         await rig.fetcher.fetch(URL)
+
+    assert str(captured.value) == "Unexpected response content encoding; expected identity"
 
 
 @pytest.mark.asyncio

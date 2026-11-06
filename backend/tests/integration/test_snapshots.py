@@ -174,7 +174,8 @@ def test_repeated_recording_creates_one_version_and_one_object(
         normalized_text="Fixture",
         sections=[{"id": "1", "text": "Fixture"}],
     )
-    assert first == second
+    assert first.version_id == second.version_id
+    assert first.created and not second.created
     with database.sessions() as session:
         versions = session.scalars(
             select(DocumentVersion).where(
@@ -244,5 +245,5 @@ def test_database_failure_rolls_back_and_object_is_safe_to_retry(
         sections=[],
     )
     with database.sessions() as session:
-        assert session.get(DocumentVersion, version_id) is not None
+        assert session.get(DocumentVersion, version_id.version_id) is not None
     assert storage.client.list_objects_v2(Bucket=storage.bucket)["KeyCount"] == 1

@@ -112,9 +112,16 @@ class Change(Base):
 class CrawlRun(Base):
     __tablename__ = "crawl_runs"
     __table_args__ = (
-        CheckConstraint("status IN ('running', 'succeeded', 'failed')", name="ck_run_status"),
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed', 'paused')", name="ck_run_status"
+        ),
         CheckConstraint("finished_at IS NULL OR finished_at >= started_at", name="ck_run_times"),
         CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_run_duration"),
+        CheckConstraint(
+            "discovered >= 0 AND fetched >= 0 AND new_versions >= 0 AND unchanged >= 0 "
+            "AND failed >= 0 AND paused >= 0",
+            name="ck_run_counts",
+        ),
     )
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     source_id: Mapped[UUID] = mapped_column(ForeignKey("sources.id"), index=True)
@@ -123,3 +130,10 @@ class CrawlRun(Base):
     status: Mapped[str] = mapped_column(String(20), server_default="running")
     error: Mapped[str | None] = mapped_column(Text)
     duration_ms: Mapped[float | None] = mapped_column(Float)
+
+    discovered: Mapped[int] = mapped_column(Integer, server_default="0")
+    fetched: Mapped[int] = mapped_column(Integer, server_default="0")
+    new_versions: Mapped[int] = mapped_column(Integer, server_default="0")
+    unchanged: Mapped[int] = mapped_column(Integer, server_default="0")
+    failed: Mapped[int] = mapped_column(Integer, server_default="0")
+    paused: Mapped[int] = mapped_column(Integer, server_default="0")

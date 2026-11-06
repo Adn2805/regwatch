@@ -2,6 +2,7 @@
 
 Phase 1 so far: infrastructure, schema, fixture-based RBI discovery, and a tested
 HTTP fetcher with robots handling, immutable snapshot storage, and version persistence.
+A crawl service now joins discovery, fetching, storage, and naive change detection.
 No live source is enabled.
 
 ```mermaid
@@ -111,11 +112,38 @@ flowchart LR
   document. It does not implement parsing, document discovery, change detection,
   scheduling, or HTTP endpoints. No migration is needed for this step.
 
+- 2026-11-06: Orphan snapshots are safe: they are immutable, content-addressed, and reusable on retry; deleting them on database rollback could remove bytes referenced by another document.
+
+
+- 2026-11-06: Step 5 adds a crawl service with injected adapters/fetcher/storage
+  and a repository for short audit/document transactions. Synchronous SQL/S3
+  operations run through asyncio.to_thread; sessions never cross thread calls.
+- 2026-11-06: Lock one document row while finding its latest stored version and
+  inserting a new version plus naive Change in the same transaction. Relying on
+  a version unique constraint alone would not serialize the previous-version
+  decision. The first version and duplicate hashes never create Change rows.
+  Previously seen hashes count unchanged even after an intervening version;
+  the requested unique-content model does not represent reversion occurrences.
+- 2026-11-06: Add six nonnegative counters and paused status to crawl_runs through
+  migration 0002. Checkpoint discovery and successful fetches before storage,
+  then progress after each document. An individual failure is isolated; a
+  SourcePaused outcome stops the run, records a fixed reason, and pauses the
+  source. Already-paused sources create a paused audit row without HTTP calls.
+- 2026-11-06: Keep this step raw-only: normalized_text is empty, sections is [],
+  and parser_yield is 0. No HTML/PDF extraction, normalization, or materiality
+  claim is made. A naive diff contains from/to hashes and is_cosmetic=false.
+- 2026-11-06: Test a real child-process exit immediately after MinIO upload.
+  Retrying reuses its orphan object without duplicate versions or changes.
+  The abandoned run remains running with last checkpointed counts because
+  process termination cannot execute finally; lease expiry/reconciliation is
+  deliberately deferred to Phase 2 rather than claiming crash recovery here.
+
 ## Current limits
 
 The storage API now conditionally writes immutable content-addressed objects.
-Version persistence is tested, but fetch, discovery, parsing, and change detection
-are not yet orchestrated into a complete crawl pipeline.
+The crawl service orchestrates discovery, fetch, immutable storage, version
+deduplication, and naive changes. Parsing/normalization and meaningful diffs
+remain unimplemented; run metadata reflects raw-byte processing only.
 No lease scheduler, HTTP API, or notifications exist yet. RBI discovery
 is tested against synthetic RSS only; compatibility with the live feed remains
 unverified. No live RBI requests have been made. Tests inject MockTransport and fake clocks;
@@ -123,6 +151,6 @@ the new network tests also run with Docker networking disabled. HTTP destination
 are validated and policy-checked; source enablement and site-terms review remain
 manual prerequisites for a future live crawl.
 Source validators are reserved fields; document-level validators can be added
-when fetching behavior is implemented. Parser yield counts extracted sections.
+with Phase 2 conditional fetching. Parser yield counts extracted sections.
 
 100x scaling analysis will be grounded in later load measurements.

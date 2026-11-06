@@ -153,7 +153,9 @@ class Fetcher:
                             response.headers.get("content-encoding", "identity").lower()
                             != "identity"
                         ):
-                            raise FetchError("Unexpected response content encoding")
+                            raise FetchError(
+                                "Unexpected response content encoding; expected identity"
+                            )
                         limit = self._settings.crawl_max_response_bytes
                         declared = response.headers.get("content-length")
                         if declared is not None:

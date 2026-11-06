@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add Phase 1 Step 5 crawl orchestration, source-scoped document upserts,
+  version deduplication, and atomic first/subsequent-version naive changes.
+- Add migration 0002 for durable crawl counts and paused outcomes; isolate
+  document failures and stop paused sources with recorded reasons.
+- Verify mocked discovery/fetch plus real PostgreSQL/MinIO, including a hard
+  exit after upload and rollback when inserting a change fails.
+- Clarify the unexpected-compression error and document safe orphan snapshots.
+- Verify 156 tests in Docker; the complete Phase 1 gate remains pending.
+
 - Verify identity encoding with a real-gzip test that rejects compression before reading.
 - Add SHA-256 hashing, conditional MinIO snapshot writes, immutable object metadata,
   and upload-before-transaction version persistence.
